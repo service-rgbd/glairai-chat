@@ -1,0 +1,470 @@
+Cahier des charges complet — Application de messagerie instantanée (inspiration WhatsApp)
+Nom projet : à définir
+Version : V1 Architecture professionnelle évolutive
+Objectif : créer une application de messagerie moderne, rapide, fluide, sécurisée et évolutive, inspirée du fonctionnement de WhatsApp sans reproduire son identité visuelle.
+1. Vision produit
+L'application est une plateforme de communication instantanée mobile permettant :
+Messages texte temps réel
+Envoi photos
+Envoi vidéos
+Messages vocaux
+Statuts/Stories
+Appels audio
+Appels vidéo
+Réactions
+Groupes
+Accusés de lecture
+Présence en ligne
+Notifications push
+Partage documents
+Messages éphémères
+Recherche intelligente
+Archivage
+Blocage utilisateurs
+Sécurité renforcée
+L'application doit être :
+ultra fluide
+moderne
+légère
+sécurisée
+scalable
+capable d'évoluer vers plusieurs millions d'utilisateurs
+2. Stack technique
+Frontend
+Framework :
+React Native
+Expo
+Bibliothèques :
+Expo Router
+React Query
+Zustand
+React Hook Form
+Axios
+Socket.io Client
+Expo Notifications
+Expo Image
+Reanimated
+Gesture Handler
+Backend
+Infrastructure :
+Backend API :
+Render
+Serveur :
+Node.js
+ExpressJS
+Communication temps réel :
+Socket.io
+Base de données :
+Neon PostgreSQL
+ORM :
+Prisma
+Stockage médias :
+Cloudinary
+Cache :
+Redis
+Authentification :
+JWT
+Refresh Token
+Push notifications :
+Firebase Cloud Messaging
+Appels audio/vidéo :
+WebRTC
+Traitement vidéo :
+FFmpeg
+CDN :
+Cloudflare
+Monitoring :
+Sentry
+3. Architecture système
+React Native App
+
+↓
+API Gateway
+
+↓
+NodeJS + Express (Render)
+
+↓
+Socket.io
+
+↓
+Redis Cache
+
+↓
+Neon PostgreSQL
+
+↓
+Cloudinary
+
+↓
+FCM Push Notifications
+4. Structure du Store (Zustand)
+Structure réelle pour éviter le chaos dans le projet :
+store/
+
+auth/
+
+useAuthStore.ts
+
+chat/
+
+useChatStore.ts
+useMessageStore.ts
+useGroupStore.ts
+
+user/
+
+useUserStore.ts
+useProfileStore.ts
+
+stories/
+
+useStoryStore.ts
+
+calls/
+
+useCallStore.ts
+
+notifications/
+
+useNotificationStore.ts
+
+media/
+
+useMediaStore.ts
+
+settings/
+
+useSettingsStore.ts
+
+network/
+
+useConnectionStore.ts
+
+premium/
+
+usePremiumStore.ts
+5. Structure projet React Native
+src/
+
+app/
+
+(auth)
+(home)
+(chat)
+(calls)
+(settings)
+(profile)
+
+components/
+
+chat/
+message/
+story/
+call/
+buttons/
+inputs/
+modals/
+
+hooks/
+
+services/
+
+api/
+socket/
+notifications/
+
+utils/
+
+store/
+
+constants/
+
+assets/
+
+animations/
+
+types/
+
+contexts/
+6. Fonctionnalités détaillées
+Module Authentification
+Fonctions :
+Inscription téléphone
+OTP SMS
+Connexion
+Déconnexion
+Refresh token automatique
+Mot de passe oublié
+Sessions multiples
+Profil utilisateur
+Informations :
+Photo profil
+Nom
+Bio
+Numéro
+Date création
+Statut personnalisé
+Dernière connexion
+Options :
+Modifier profil
+Masquer dernière connexion
+Masquer photo
+Confidentialité
+7. Système messagerie
+Messages :
+Types :
+Texte
+Image
+Vidéo
+Audio
+GIF
+Document
+Localisation
+Contact
+Statuts :
+✓ envoyé
+✓✓ reçu
+✓✓ bleu lu
+Message :
+supprimé pour moi
+supprimé pour tous
+transféré
+épinglé
+réponse citation
+réactions emoji
+8. Envoi photo et vidéo
+Flux :
+Utilisateur sélectionne média
+↓
+Compression automatique
+↓
+Upload Cloudinary
+↓
+URL envoyée serveur
+↓
+Serveur sauvegarde en base
+↓
+Socket émission temps réel
+↓
+Destinataire reçoit
+↓
+Téléchargement cache local
+Compression :
+Images :
+WebP
+Vidéos :
+H264
+Compression dynamique
+Miniatures :
+générées automatiquement
+9. Statuts / Stories
+Durée :
+24 heures
+Fonctions :
+photo
+vidéo
+texte
+musique
+réactions
+Système vues :
+Exemple :
+Vu par :
+
+Jean
+Paul
+Marie
+Marc
+
+Total : 45 vues
+Options :
+masquer vues
+restreindre visibilité
+amis proches
+supprimer statut
+10. Algorithme vues stories
+Table :
+story_views
+
+id
+
+story_id
+
+viewer_id
+
+viewed_at
+Conditions :
+Si utilisateur ouvre story :
+Vérifier :
+Existe déjà ?
+
+Oui :
+
+ne rien créer
+
+Non :
+
+Créer vue
+11. Groupes
+Fonctions :
+créer groupe
+avatar groupe
+description
+administrateurs
+permissions
+invitations
+mentions
+réactions
+12. Appels audio et vidéo
+Technologie :
+WebRTC
+Fonctions :
+appel individuel
+appel groupe
+coupure micro
+caméra avant/arrière
+partage écran
+réduction bruit
+13. Notifications
+Types :
+message reçu
+appel entrant
+réaction
+story
+groupe
+Exemple :
+John :
+
+Salut 👋
+14. Base de données Neon
+Structure réelle :
+Users
+id
+name
+phone
+avatar
+bio
+createdAt
+Chats
+id
+type
+createdAt
+Participants
+id
+chatId
+userId
+Messages
+id
+chatId
+senderId
+type
+content
+mediaUrl
+status
+createdAt
+Stories
+id
+userId
+mediaUrl
+expiresAt
+createdAt
+StoryViews
+id
+storyId
+viewerId
+createdAt
+Calls
+id
+callerId
+receiverId
+type
+duration
+createdAt
+Notifications
+id
+userId
+type
+content
+read
+15. Design UI
+Ne pas copier WhatsApp.
+Direction artistique :
+Couleurs :
+Primaire :
+#6D4AFF
+Secondaire :
+#0F172A
+Accent :
+#00D4A4
+Fond clair :
+#F8FAFC
+Fond sombre :
+#0A0A0A
+Style :
+cartes arrondies
+animations fluides
+ombres douces
+effet glass léger
+micro-interactions
+transitions naturelles
+16. Sécurité
+Protection :
+JWT
+Refresh Token
+Hash bcrypt
+HTTPS
+Rate limiting
+Validation Zod
+Anti spam
+Anti flood
+Détection connexions suspectes
+17. Optimisation performances
+Médias :
+lazy loading
+pagination
+cache Redis
+CDN Cloudflare
+compression automatique
+Chats :
+chargement progressif
+Exemple :
+20 messages
+
+↓
+
+scroll
+
+↓
+
+20 autres
+18. Préparation App Store / Play Store
+Icônes :
+adaptive icon
+splash screen
+Légal :
+Politique confidentialité
+Conditions d'utilisation
+Gestion RGPD
+19. Roadmap réaliste
+Phase 1 :
+Auth
+Chats
+Messages
+Photos
+Vidéos
+Notifications
+Durée :
+4–6 semaines
+Phase 2 :
+Stories
+Réactions
+Groupes
+Appels
+Durée :
+4 semaines
+Phase 3 :
+Optimisation
+IA
+Premium
+Analytics
+Durée :

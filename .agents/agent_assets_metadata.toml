@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "0i43txC0XLV5sNXdWOVLJ"
+uri = "file://artifacts/gbairai/assets/images/icon.png"
+type = "image"
+title = "gbairai app icon"

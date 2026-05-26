@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Gbairai"
+version = "1.0.0"
+id = "artifacts/gbairai"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 24637
+
+[services.development]
+run = "pnpm --filter @workspace/gbairai run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/gbairai", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/gbairai", "run", "serve" ]
+
+[services.env]
+PORT = "24637"
+BASE_PATH = "/"
