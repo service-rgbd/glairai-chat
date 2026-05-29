@@ -54,5 +54,24 @@
     "typescript": "~5.9.2",
     "zod": "catalog:",
     "zod-validation-error": "^3.4.0"
+  },
+  "dependencies": {
+    "@config-plugins/react-native-webrtc": "^14.0.0",
+    "@livekit/react-native": "^2.10.3",
+    "@livekit/react-native-expo-plugin": "^1.0.2",
+    "@livekit/react-native-webrtc": "^144.0.0",
+    "@tanstack/react-query-persist-client": "^5.100.14",
+    "expo-audio": "~1.1.1",
+    "expo-build-properties": "~1.0.10",
+    "expo-contacts": "~15.0.11",
+    "expo-device": "~8.0.10",
+    "expo-file-system": "~19.0.22",
+    "expo-media-library": "~18.2.1",
+    "expo-notifications": "~0.32.17",
+    "expo-sqlite": "~16.0.10",
+    "expo-video": "~3.0.16",
+    "expo-video-thumbnails": "~10.0.8",
+    "libphonenumber-js": "^1.13.3",
+    "livekit-client": "^2.19.0"
   }
 }
