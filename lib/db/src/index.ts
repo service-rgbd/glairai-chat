@@ -1,16 +1,33 @@
+import dotenv from "dotenv";
 import { drizzle } from "drizzle-orm/node-postgres";
+import fs from "node:fs";
 import pg from "pg";
+import path from "path";
+import { fileURLToPath } from "url";
 import * as schema from "./schema";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const workspaceRoot = path.resolve(currentDir, "..", "..", "..");
+const envPath = path.resolve(workspaceRoot, ".env.local");
+
+if (fs.existsSync(envPath)) {
+  const parsed = dotenv.parse(fs.readFileSync(envPath, "utf8"));
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!process.env[key] || process.env[key]?.trim() === "") {
+      process.env[key] = value;
+    }
+  }
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool, { schema });
+const connectionString = process.env.DATABASE_URL;
+
+export const pool = connectionString
+  ? new Pool({ connectionString })
+  : null;
+
+export const db = pool ? drizzle(pool, { schema }) : null;
+export const hasDatabase = Boolean(pool);
 
 export * from "./schema";

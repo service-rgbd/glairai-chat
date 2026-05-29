@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: glairai-chat
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install && pnpm --filter @workspace/api-server build
+    startCommand: pnpm --filter @workspace/api-server start
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_ENV
+        value: production

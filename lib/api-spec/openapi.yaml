@@ -10,6 +10,24 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Phone authentication
+  - name: users
+    description: User profile and presence
+  - name: conversations
+    description: Messaging conversations and messages
+  - name: contacts
+    description: Contact syncing
+  - name: devices
+    description: Push token registration
+  - name: metadata
+    description: Static metadata
+  - name: calls
+    description: Audio and video calling
+  - name: media
+    description: Media upload targets and resolution
+  - name: stories
+    description: User stories
 paths:
   /healthz:
     get:
@@ -24,7 +42,540 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/request-otp:
+    post:
+      operationId: requestOtp
+      tags: [auth]
+      summary: Request a phone OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestOtpInput"
+      responses:
+        "200":
+          description: OTP requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpRequestResult"
+  /auth/verify-otp:
+    post:
+      operationId: verifyOtp
+      tags: [auth]
+      summary: Verify a phone OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyOtpInput"
+      responses:
+        "200":
+          description: OTP verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+  /me:
+    get:
+      operationId: getCurrentUser
+      tags: [users]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+    patch:
+      operationId: updateCurrentUser
+      tags: [users]
+      summary: Update current authenticated user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileInput"
+      responses:
+        "200":
+          description: Updated user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+  /presence/heartbeat:
+    post:
+      operationId: updatePresenceHeartbeat
+      tags: [users]
+      summary: Update current user presence heartbeat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresenceHeartbeatInput"
+      responses:
+        "200":
+          description: Presence updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresenceSnapshot"
+  /conversations:
+    get:
+      operationId: listConversations
+      tags: [conversations]
+      summary: List current user conversations
+      responses:
+        "200":
+          description: Conversation list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ConversationSummary"
+                required:
+                  - conversations
+    post:
+      operationId: createConversation
+      tags: [conversations]
+      summary: Create or reuse a conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConversationInput"
+      responses:
+        "200":
+          description: Conversation created or reused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummary"
+  /conversations/{conversationId}:
+    get:
+      operationId: getConversation
+      tags: [conversations]
+      summary: Get a single conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Conversation summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummary"
+    patch:
+      operationId: updateConversation
+      tags: [conversations]
+      summary: Update group conversation metadata
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateConversationInput"
+      responses:
+        "200":
+          description: Updated conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummary"
+  /conversations/join:
+    post:
+      operationId: joinGroupByInvite
+      tags: [conversations]
+      summary: Join a group using an invite token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinGroupInput"
+      responses:
+        "200":
+          description: Joined group conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummary"
+  /conversations/{conversationId}/members:
+    post:
+      operationId: addConversationMembers
+      tags: [conversations]
+      summary: Add members to a group conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddConversationMembersInput"
+      responses:
+        "200":
+          description: Updated conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummary"
+  /conversations/{conversationId}/members/{userId}:
+    delete:
+      operationId: removeConversationMember
+      tags: [conversations]
+      summary: Remove a member from a group conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Updated conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummary"
+  /conversations/{conversationId}/leave:
+    post:
+      operationId: leaveConversation
+      tags: [conversations]
+      summary: Leave a group conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Left conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaveConversationResult"
+  /conversations/{conversationId}/invite:
+    post:
+      operationId: createGroupInvite
+      tags: [conversations]
+      summary: Create a group invite link
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Group invite created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupInvite"
+  /group-invites/{token}:
+    get:
+      operationId: getGroupInvitePreview
+      tags: [conversations]
+      summary: Preview a group invite before joining
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Group invite preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupInvitePreview"
+  /conversations/{conversationId}/messages:
+    get:
+      operationId: listConversationMessages
+      tags: [conversations]
+      summary: List messages for a conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Message page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagePage"
+    post:
+      operationId: sendConversationMessage
+      tags: [conversations]
+      summary: Send a new message
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageInput"
+      responses:
+        "200":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationMessage"
+  /conversations/{conversationId}/read:
+    post:
+      operationId: markConversationRead
+      tags: [conversations]
+      summary: Mark a conversation as read up to a message
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkConversationReadInput"
+      responses:
+        "200":
+          description: Read receipt updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageReceipt"
+  /messages/{messageId}/delivered:
+    post:
+      operationId: markMessageDelivered
+      tags: [conversations]
+      summary: Mark a message as delivered
+      parameters:
+        - $ref: "#/components/parameters/MessageId"
+      responses:
+        "200":
+          description: Delivery receipt updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageReceipt"
+  /contacts/sync:
+    post:
+      operationId: syncContacts
+      tags: [contacts]
+      summary: Sync phone contacts and match existing users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncContactsInput"
+      responses:
+        "200":
+          description: Contact sync result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactSyncResult"
+  /devices/register:
+    post:
+      operationId: registerDeviceToken
+      tags: [devices]
+      summary: Register a push device token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDeviceInput"
+      responses:
+        "200":
+          description: Device registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisteredDevice"
+  /metadata/countries:
+    get:
+      operationId: listSupportedCountries
+      tags: [metadata]
+      summary: List supported phone countries and calling codes
+      responses:
+        "200":
+          description: Country metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  countries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CountryOption"
+                required:
+                  - countries
+  /calls/token:
+    post:
+      operationId: createCallToken
+      tags: [calls]
+      summary: Create a LiveKit call token for a conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCallTokenInput"
+      responses:
+        "200":
+          description: LiveKit call token created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallSession"
+  /media/audio/upload-target:
+    post:
+      operationId: createAudioUploadTarget
+      tags: [media]
+      summary: Create an upload target for an audio note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAudioUploadTargetInput"
+      responses:
+        "200":
+          description: Audio upload target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AudioUploadTarget"
+  /media/upload-target:
+    post:
+      operationId: createMediaUploadTarget
+      tags: [media]
+      summary: Create an upload target for avatars, chat media or stories
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMediaUploadTargetInput"
+      responses:
+        "200":
+          description: Generic media upload target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaUploadTarget"
+  /media/resolve:
+    get:
+      operationId: resolveMediaUrl
+      tags: [media]
+      summary: Resolve a media key to a public URL
+      parameters:
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resolved media URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolvedMedia"
+  /stories:
+    get:
+      operationId: listStories
+      tags: [stories]
+      summary: List active stories
+      responses:
+        "200":
+          description: Story list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stories:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Story"
+                required:
+                  - stories
+    post:
+      operationId: createStory
+      tags: [stories]
+      summary: Create a story
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStoryInput"
+      responses:
+        "200":
+          description: Created story
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Story"
+  /stories/{storyId}/views:
+    post:
+      operationId: addStoryView
+      tags: [stories]
+      summary: Mark a story as viewed
+      parameters:
+        - $ref: "#/components/parameters/StoryId"
+      responses:
+        "200":
+          description: Story with updated viewers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Story"
 components:
+  parameters:
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema:
+        type: string
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+    StoryId:
+      name: storyId
+      in: path
+      required: true
+      schema:
+        type: string
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +584,627 @@ components:
           type: string
       required:
         - status
+    CountryOption:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        callingCode:
+          type: string
+        flag:
+          type: string
+      required:
+        - code
+        - name
+        - callingCode
+        - flag
+    UserSettings:
+      type: object
+      properties:
+        lastSeenVisibility:
+          type: string
+          enum: [everyone, contacts, nobody]
+        readReceiptsEnabled:
+          type: boolean
+        notificationsEnabled:
+          type: boolean
+        notificationSoundEnabled:
+          type: boolean
+        vibrationEnabled:
+          type: boolean
+        autoDownloadMedia:
+          type: boolean
+        lowDataMode:
+          type: boolean
+        chatFontScale:
+          type: string
+          enum: [small, medium, large]
+      required:
+        - lastSeenVisibility
+        - readReceiptsEnabled
+        - notificationsEnabled
+        - notificationSoundEnabled
+        - vibrationEnabled
+        - autoDownloadMedia
+        - lowDataMode
+        - chatFontScale
+    PresenceSnapshot:
+      type: object
+      properties:
+        isOnline:
+          type: boolean
+        lastSeenAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - isOnline
+        - lastSeenAt
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        phone:
+          type: string
+        countryCode:
+          type: string
+        name:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+        bio:
+          type: string
+        statusText:
+          type: string
+        initials:
+          type: string
+        color:
+          type: string
+        isOnboarded:
+          type: boolean
+        settings:
+          $ref: "#/components/schemas/UserSettings"
+        presence:
+          $ref: "#/components/schemas/PresenceSnapshot"
+      required:
+        - id
+        - phone
+        - countryCode
+        - name
+        - avatarUrl
+        - bio
+        - statusText
+        - initials
+        - color
+        - isOnboarded
+        - settings
+        - presence
+    RequestOtpInput:
+      type: object
+      properties:
+        phone:
+          type: string
+        countryCode:
+          type: string
+      required:
+        - phone
+        - countryCode
+    OtpRequestResult:
+      type: object
+      properties:
+        requestId:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        demoCode:
+          type: string
+          nullable: true
+      required:
+        - requestId
+        - expiresAt
+        - demoCode
+    VerifyOtpInput:
+      type: object
+      properties:
+        requestId:
+          type: string
+        phone:
+          type: string
+        code:
+          type: string
+      required:
+        - requestId
+        - phone
+        - code
+    AuthSession:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserProfile"
+      required:
+        - token
+        - user
+    UpdateProfileInput:
+      type: object
+      properties:
+        name:
+          type: string
+        avatarUrl:
+          type: string
+          nullable: true
+        bio:
+          type: string
+        statusText:
+          type: string
+        notificationsEnabled:
+          type: boolean
+        notificationSoundEnabled:
+          type: boolean
+        vibrationEnabled:
+          type: boolean
+        autoDownloadMedia:
+          type: boolean
+        lowDataMode:
+          type: boolean
+        readReceiptsEnabled:
+          type: boolean
+        lastSeenVisibility:
+          type: string
+          enum: [everyone, contacts, nobody]
+        chatFontScale:
+          type: string
+          enum: [small, medium, large]
+      additionalProperties: false
+    PresenceHeartbeatInput:
+      type: object
+      properties:
+        isOnline:
+          type: boolean
+      required:
+        - isOnline
+    ConversationParticipant:
+      type: object
+      properties:
+        userId:
+          type: string
+        profile:
+          $ref: "#/components/schemas/UserProfile"
+      required:
+        - userId
+        - profile
+    MessageReceipt:
+      type: object
+      properties:
+        messageId:
+          type: string
+        conversationId:
+          type: string
+        userId:
+          type: string
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - messageId
+        - conversationId
+        - userId
+        - deliveredAt
+        - readAt
+    ConversationMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+        senderId:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+          enum: [text, image, audio, video]
+        createdAt:
+          type: string
+          format: date-time
+        receipts:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageReceipt"
+      required:
+        - id
+        - conversationId
+        - senderId
+        - content
+        - type
+        - createdAt
+        - receipts
+    ConversationSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [direct, group]
+        title:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationParticipant"
+        unreadCount:
+          type: integer
+        lastMessage:
+          $ref: "#/components/schemas/ConversationMessage"
+        lastReadMessageId:
+          type: string
+          nullable: true
+      required:
+        - id
+        - type
+        - title
+        - avatarUrl
+        - createdBy
+        - participants
+        - unreadCount
+        - lastReadMessageId
+    MessagePage:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationMessage"
+        nextCursor:
+          type: string
+          nullable: true
+      required:
+        - messages
+        - nextCursor
+    CreateConversationInput:
+      type: object
+      properties:
+        participantUserIds:
+          type: array
+          items:
+            type: string
+        participantPhones:
+          type: array
+          items:
+            type: string
+        title:
+          type: string
+          nullable: true
+      required:
+        - participantUserIds
+        - participantPhones
+        - title
+    UpdateConversationInput:
+      type: object
+      properties:
+        title:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+    AddConversationMembersInput:
+      type: object
+      properties:
+        participantUserIds:
+          type: array
+          items:
+            type: string
+        participantPhones:
+          type: array
+          items:
+            type: string
+      required:
+        - participantUserIds
+        - participantPhones
+    GroupInvite:
+      type: object
+      properties:
+        token:
+          type: string
+        inviteUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - token
+        - inviteUrl
+        - expiresAt
+    GroupInvitePreview:
+      type: object
+      properties:
+        token:
+          type: string
+        conversationId:
+          type: string
+        title:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        memberCount:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - token
+        - conversationId
+        - title
+        - avatarUrl
+        - memberCount
+        - expiresAt
+    JoinGroupInput:
+      type: object
+      properties:
+        inviteToken:
+          type: string
+      required:
+        - inviteToken
+    LeaveConversationResult:
+      type: object
+      properties:
+        conversationId:
+          type: string
+      required:
+        - conversationId
+    SendMessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+        type:
+          type: string
+          enum: [text, image, audio, video]
+      required:
+        - content
+        - type
+    MediaCategory:
+      type: string
+      enum: [audio, avatar, chat-image, chat-video, story-image, story-video]
+    CreateMediaUploadTargetInput:
+      type: object
+      properties:
+        category:
+          $ref: "#/components/schemas/MediaCategory"
+        mimeType:
+          type: string
+        conversationId:
+          type: string
+          nullable: true
+      required:
+        - category
+        - mimeType
+    MediaUploadTarget:
+      type: object
+      properties:
+        key:
+          type: string
+        uploadUrl:
+          type: string
+        publicUrl:
+          type: string
+        contentType:
+          type: string
+        category:
+          $ref: "#/components/schemas/MediaCategory"
+      required:
+        - key
+        - uploadUrl
+        - publicUrl
+        - contentType
+        - category
+    ResolvedMedia:
+      type: object
+      properties:
+        key:
+          type: string
+        url:
+          type: string
+      required:
+        - key
+        - url
+    CreateAudioUploadTargetInput:
+      type: object
+      properties:
+        mimeType:
+          type: string
+      required:
+        - mimeType
+    AudioUploadTarget:
+      type: object
+      properties:
+        key:
+          type: string
+        uploadUrl:
+          type: string
+        publicUrl:
+          type: string
+        contentType:
+          type: string
+      required:
+        - key
+        - uploadUrl
+        - publicUrl
+        - contentType
+    Story:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        type:
+          type: string
+          enum: [text, image, video]
+        content:
+          type: string
+        backgroundColor:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        viewerIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - userId
+        - type
+        - content
+        - backgroundColor
+        - expiresAt
+        - viewerIds
+        - createdAt
+    CreateStoryInput:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [text, image, video]
+        content:
+          type: string
+        backgroundColor:
+          type: string
+      required:
+        - type
+        - content
+    MarkConversationReadInput:
+      type: object
+      properties:
+        messageId:
+          type: string
+      required:
+        - messageId
+    SyncContactItem:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+      required:
+        - name
+        - phone
+    SyncContactsInput:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncContactItem"
+      required:
+        - contacts
+    ContactMatch:
+      type: object
+      properties:
+        contactName:
+          type: string
+        phone:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserProfile"
+      required:
+        - contactName
+        - phone
+        - user
+    ContactSyncResult:
+      type: object
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/ContactMatch"
+      required:
+        - matches
+    RegisterDeviceInput:
+      type: object
+      properties:
+        pushToken:
+          type: string
+        platform:
+          type: string
+        deviceName:
+          type: string
+      required:
+        - pushToken
+        - platform
+        - deviceName
+    RegisteredDevice:
+      type: object
+      properties:
+        id:
+          type: string
+        pushToken:
+          type: string
+        platform:
+          type: string
+        deviceName:
+          type: string
+      required:
+        - id
+        - pushToken
+        - platform
+        - deviceName
+    CreateCallTokenInput:
+      type: object
+      properties:
+        conversationId:
+          type: string
+        type:
+          type: string
+          enum: [audio, video]
+      required:
+        - conversationId
+        - type
+    CallSession:
+      type: object
+      properties:
+        conversationId:
+          type: string
+        roomName:
+          type: string
+        token:
+          type: string
+        url:
+          type: string
+        type:
+          type: string
+          enum: [audio, video]
+      required:
+        - conversationId
+        - roomName
+        - token
+        - url
+        - type
 

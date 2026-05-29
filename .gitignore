@@ -27,6 +27,11 @@ node_modules
 !.vscode/launch.json
 !.vscode/extensions.json
 
+# secrets
+.env
+.env.local
+.env.*.local
+
 # misc
 /.sass-cache
 /connect.lock
@@ -40,6 +45,8 @@ testem.log
 # System Files
 .DS_Store
 Thumbs.db
+
+artifacts/gbairai/assets/fluentui-emoji/
 
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
