@@ -14,10 +14,27 @@
       "backgroundColor": "#0F172A"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSContactsUsageDescription": "Gbairai utilise vos contacts pour trouver les personnes déjà inscrites dans l'application.",
+        "NSUserNotificationsUsageDescription": "Gbairai utilise les notifications pour vous prévenir des nouveaux messages.",
+        "NSPhotoLibraryUsageDescription": "Gbairai utilise votre photothèque pour choisir une photo de profil.",
+        "NSPhotoLibraryAddUsageDescription": "Gbairai peut enregistrer les photos et vidéos reçues dans votre galerie.",
+        "NSCameraUsageDescription": "Gbairai utilise la caméra pour vos appels vidéo.",
+        "NSMicrophoneUsageDescription": "Gbairai utilise le microphone pour vos appels audio et vidéo."
+      }
     },
     "android": {
-      "backgroundColor": "#0F172A"
+      "backgroundColor": "#0F172A",
+      "permissions": [
+        "READ_CONTACTS",
+        "POST_NOTIFICATIONS",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE"
+      ]
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -30,11 +47,22 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-contacts",
+      "expo-notifications",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
+      "expo-build-properties",
+      "expo-audio",
+      "expo-media-library",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "apiBaseUrl": "https://glairai-chat.onrender.com"
     }
   }
 }
