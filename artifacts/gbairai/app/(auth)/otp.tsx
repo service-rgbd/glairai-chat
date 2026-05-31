@@ -1,17 +1,29 @@
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AuthLogo } from "@/components/AuthLogo";
 import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { isOtpDemoDevMode } from "@/lib/api-config";
 
 const CODE_LENGTH = 6;
 
 export default function OtpScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { pendingPhone } = useAuth();
+  const { pendingOtpCode, pendingPhone, requestOtpForPhone, pendingCountryCode, verifyPendingOtp } = useAuth();
   const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(""));
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(59);
@@ -24,6 +36,13 @@ export default function OtpScreen() {
     const t = setInterval(() => setCountdown((c) => Math.max(0, c - 1)), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!isOtpDemoDevMode() || !pendingOtpCode || pendingOtpCode.length !== CODE_LENGTH) {
+      return;
+    }
+    setDigits(pendingOtpCode.split("").slice(0, CODE_LENGTH));
+  }, [pendingOtpCode]);
 
   useEffect(() => {
     const code = digits.join("");
@@ -53,9 +72,21 @@ export default function OtpScreen() {
 
   const handleVerify = async (_code: string) => {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    setLoading(false);
-    router.push("/(auth)/profile-setup");
+    try {
+      const user = await verifyPendingOtp(_code);
+      setTimeout(() => {
+        router.replace(user.isOnboarded ? "/" : "/(auth)/profile-setup");
+      }, 0);
+    } catch (error) {
+      Alert.alert(
+        "Code invalide",
+        error instanceof Error ? error.message : "Impossible de vérifier le code",
+      );
+      setDigits(Array(CODE_LENGTH).fill(""));
+      inputRefs.current[0]?.focus();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const isFull = digits.every((d) => d !== "");
@@ -67,6 +98,10 @@ export default function OtpScreen() {
           <Text style={[styles.backText, { color: colors.primary }]}>‹ Retour</Text>
         </TouchableOpacity>
 
+        <View style={styles.logoSection}>
+          <AuthLogo size={128} />
+        </View>
+
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.text }]}>Vérification</Text>
           <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
@@ -74,6 +109,25 @@ export default function OtpScreen() {
             <Text style={[styles.phone, { color: colors.text }]}>{pendingPhone || "+224 6XX XXX XXX"}</Text>
           </Text>
         </View>
+
+        {isOtpDemoDevMode() ? (
+          pendingOtpCode ? (
+            <View style={[styles.demoBox, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+              <Text style={[styles.demoLabel, { color: colors.mutedForeground }]}>Code de test</Text>
+              <Text style={[styles.demoCodeValue, { color: colors.primary }]}>{pendingOtpCode}</Text>
+              <Text style={[styles.demoHint, { color: colors.mutedForeground }]}>
+                Saisi automatiquement — validez ou corrigez ci-dessous.
+              </Text>
+            </View>
+          ) : (
+            <View style={[styles.demoBox, { backgroundColor: colors.card, borderColor: colors.destructive }]}>
+              <Text style={[styles.demoLabel, { color: colors.mutedForeground }]}>Code de test</Text>
+              <Text style={[styles.demoHint, { color: colors.mutedForeground }]}>
+                En attente du code API…
+              </Text>
+            </View>
+          )
+        ) : null}
 
         <View style={styles.codeRow}>
           {digits.map((digit, i) => (
@@ -105,7 +159,20 @@ export default function OtpScreen() {
               Renvoyer dans <Text style={{ color: colors.primary }}>0:{countdown.toString().padStart(2, "0")}</Text>
             </Text>
           ) : (
-            <TouchableOpacity onPress={() => setCountdown(59)}>
+            <TouchableOpacity
+              onPress={async () => {
+                if (!pendingPhone) return;
+                try {
+                  setCountdown(59);
+                  await requestOtpForPhone(pendingPhone, pendingCountryCode);
+                } catch (error) {
+                  Alert.alert(
+                    "Envoi impossible",
+                    error instanceof Error ? error.message : "Impossible de renvoyer le code",
+                  );
+                }
+              }}
+            >
               <Text style={[styles.resendText, { color: colors.primary }]}>Renvoyer le code</Text>
             </TouchableOpacity>
           )}
@@ -133,10 +200,14 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 24,
-    gap: 32,
+    gap: 24,
   },
   backBtn: { alignSelf: "flex-start" },
   backText: { fontSize: 17, fontFamily: "Inter_500Medium" },
+  logoSection: {
+    alignItems: "center",
+    paddingVertical: 8,
+  },
   header: { gap: 10 },
   title: { fontSize: 28, fontFamily: "Inter_700Bold" },
   subtitle: { fontSize: 15, fontFamily: "Inter_400Regular", lineHeight: 24 },
@@ -157,6 +228,24 @@ const styles = StyleSheet.create({
   },
   resend: { alignItems: "center" },
   resendText: { fontSize: 14, fontFamily: "Inter_400Regular" },
+  demoBox: {
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    alignItems: "center",
+    gap: 4,
+  },
+  demoLabel: { fontSize: 12, fontFamily: "Inter_500Medium", textTransform: "uppercase", letterSpacing: 0.5 },
+  demoCodeValue: { fontSize: 28, fontFamily: "Inter_700Bold", letterSpacing: 6 },
+  demoHint: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 17,
+    marginTop: 4,
+  },
   btn: {
     height: 56,
     borderRadius: 16,

@@ -17,6 +17,15 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _otpDemoRequests = false;
+
+/**
+ * En mode test Expo, envoie `X-Otp-Demo: true` sur POST /auth/request-otp
+ * pour que l'API renvoie le code dans `demoCode`.
+ */
+export function setOtpDemoRequests(enabled: boolean): void {
+  _otpDemoRequests = enabled;
+}
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -358,7 +367,17 @@ export async function customFetch<T = unknown>(
     }
   }
 
-  const requestInfo = { method, url: resolveUrl(input) };
+  const requestUrl = resolveUrl(input);
+  if (
+    _otpDemoRequests &&
+    method === "POST" &&
+    requestUrl.includes("/auth/request-otp") &&
+    !headers.has("x-otp-demo")
+  ) {
+    headers.set("x-otp-demo", "true");
+  }
+
+  const requestInfo = { method, url: requestUrl };
 
   const response = await fetch(input, { ...init, method, headers });
 

@@ -58,6 +58,11 @@ export function getOtpSmsStatus() {
   };
 }
 
+/** Renvoie le code OTP dans la réponse API (mode test / dev). Désactiver en prod : OTP_DEMO_CODE_ENABLED=false */
+export function shouldExposeOtpDemoCode() {
+  return process.env["OTP_DEMO_CODE_ENABLED"] !== "false";
+}
+
 export async function sendOtpSms(input: {
   phoneE164: string;
   code: string;

@@ -20,7 +20,7 @@ import { and, desc, eq, gte, inArray, lte, ne, or } from "drizzle-orm";
 import { getCountries, getCountryCallingCode, parsePhoneNumberFromString } from "libphonenumber-js";
 
 import { logger } from "./logger";
-import { sendOtpSms } from "./sms-service";
+import { sendOtpSms, shouldExposeOtpDemoCode } from "./sms-service";
 
 type LastSeenVisibility = "everyone" | "contacts" | "nobody";
 type ChatFontScale = "small" | "medium" | "large";
@@ -122,7 +122,8 @@ export interface RealtimeEvent {
     | "conversation.created"
     | "conversation.updated"
     | "member.added"
-    | "member.removed";
+    | "member.removed"
+    | "call.invited";
   participantIds: string[];
   conversationId?: string;
   messageId?: string;
@@ -131,6 +132,9 @@ export interface RealtimeEvent {
   presence?: { userId: string; snapshot: PresenceSnapshot };
   conversation?: ConversationSummary;
   removedUserId?: string;
+  callerUserId?: string;
+  callerName?: string;
+  callType?: "audio" | "video";
 }
 
 export interface GroupInvite {
@@ -153,7 +157,11 @@ type Awaitable<T> = T | Promise<T>;
 export interface ChatService {
   setEventPublisher(publisher: ((event: RealtimeEvent) => void) | null): void;
   listSupportedCountries(): Awaitable<{ countries: CountryOption[] }>;
-  requestOtp(input: { phone: string; countryCode: string }): Awaitable<{
+  requestOtp(input: {
+    phone: string;
+    countryCode: string;
+    forceDemoCode?: boolean;
+  }): Awaitable<{
     requestId: string;
     expiresAt: string;
     demoCode: string | null;
@@ -247,6 +255,15 @@ export interface ChatService {
   ): Awaitable<ConversationMessage>;
   deleteStory(token: string, storyId: string): Awaitable<{ storyId: string }>;
   resolveUserIdByToken(token: string): Awaitable<string>;
+  notifyIncomingCall(
+    token: string,
+    input: {
+      conversationId: string;
+      type: "audio" | "video";
+      callerUserId: string;
+      callerName: string;
+    },
+  ): Awaitable<void>;
 }
 
 interface UserRecord {
@@ -465,6 +482,50 @@ async function sendExpoPushMessages(
   }
 }
 
+async function sendExpoIncomingCallPushes(
+  recipients: Array<{ pushToken: string; notificationSoundEnabled: boolean }>,
+  input: {
+    callerName: string;
+    conversationId: string;
+    callType: "audio" | "video";
+    callerUserId: string;
+  },
+) {
+  const payload = recipients
+    .filter((item) => item.pushToken.startsWith("ExponentPushToken["))
+    .map((item) => ({
+      to: item.pushToken,
+      title: input.callerName,
+      body: input.callType === "video" ? "Appel vidéo entrant" : "Appel audio entrant",
+      sound: item.notificationSoundEnabled ? "default" : null,
+      priority: "high",
+      channelId: "calls",
+      categoryId: "incoming_call",
+      data: {
+        type: "incoming_call",
+        conversationId: input.conversationId,
+        callType: input.callType,
+        callerUserId: input.callerUserId,
+        callerName: input.callerName,
+      },
+    }));
+
+  if (!payload.length) return;
+
+  try {
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // Notifications are best-effort in development.
+  }
+}
+
 class InMemoryChatService {
   private readonly users = new Map<string, UserRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
@@ -498,7 +559,7 @@ class InMemoryChatService {
     };
   }
 
-  requestOtp(input: { phone: string; countryCode: string }) {
+  requestOtp(input: { phone: string; countryCode: string; forceDemoCode?: boolean }) {
     const normalized = normalizePhone(input.phone, input.countryCode);
     this.cleanupExpiredOtpRequests();
 
@@ -529,11 +590,18 @@ class InMemoryChatService {
       logger.warn({ err: error }, "OTP SMS failed in development");
     });
 
+    const exposeDemoCode = shouldExposeOtpDemoCode() || input.forceDemoCode;
+    if (exposeDemoCode) {
+      logger.info(
+        { phone: normalized.e164, requestId, otpDemoCode: rawCode },
+        "OTP demo code generated",
+      );
+    }
+
     return {
       requestId,
       expiresAt: record.expiresAt,
-      demoCode:
-        process.env["NODE_ENV"] === "production" ? null : rawCode,
+      demoCode: exposeDemoCode ? rawCode : null,
     };
   }
 
@@ -1407,7 +1475,7 @@ class DatabaseChatService implements ChatService {
     };
   }
 
-  async requestOtp(input: { phone: string; countryCode: string }) {
+  async requestOtp(input: { phone: string; countryCode: string; forceDemoCode?: boolean }) {
     this.requireDatabase();
     const normalized = normalizePhone(input.phone, input.countryCode);
     const requestId = randomId("otp");
@@ -1450,10 +1518,18 @@ class DatabaseChatService implements ChatService {
       }
     }
 
+    const exposeDemoCode = shouldExposeOtpDemoCode() || input.forceDemoCode;
+    if (exposeDemoCode) {
+      logger.info(
+        { phone: normalized.e164, requestId, otpDemoCode: rawCode },
+        "OTP demo code generated",
+      );
+    }
+
     return {
       requestId,
       expiresAt: expiresAt.toISOString(),
-      demoCode: process.env["NODE_ENV"] === "production" ? null : rawCode,
+      demoCode: exposeDemoCode ? rawCode : null,
     };
   }
 
@@ -2764,6 +2840,57 @@ class DatabaseChatService implements ChatService {
 
     await db!.delete(storiesTable).where(eq(storiesTable.id, storyId));
     return { storyId };
+  }
+
+  async notifyIncomingCall(
+    token: string,
+    input: {
+      conversationId: string;
+      type: "audio" | "video";
+      callerUserId: string;
+      callerName: string;
+    },
+  ) {
+    const user = await this.requireUserByToken(token);
+    if (user.id !== input.callerUserId) {
+      throw new Error("Appel non autorisé");
+    }
+
+    const participantIds = await this.getConversationParticipantIds(input.conversationId);
+    this.publish({
+      type: "call.invited",
+      participantIds,
+      conversationId: input.conversationId,
+      callerUserId: input.callerUserId,
+      callerName: input.callerName,
+      callType: input.type,
+    });
+
+    const recipientIds = participantIds.filter((id) => id !== input.callerUserId);
+    if (!recipientIds.length) {
+      return;
+    }
+
+    const devices = await db!
+      .select({
+        pushToken: deviceTokensTable.pushToken,
+        notificationSoundEnabled: usersTable.notificationSoundEnabled,
+      })
+      .from(deviceTokensTable)
+      .innerJoin(usersTable, eq(usersTable.id, deviceTokensTable.userId))
+      .where(
+        and(
+          inArray(deviceTokensTable.userId, recipientIds),
+          eq(usersTable.notificationsEnabled, true),
+        ),
+      );
+
+    await sendExpoIncomingCallPushes(devices, {
+      callerName: input.callerName,
+      conversationId: input.conversationId,
+      callType: input.type,
+      callerUserId: input.callerUserId,
+    });
   }
 
   async resolveUserIdByToken(token: string) {

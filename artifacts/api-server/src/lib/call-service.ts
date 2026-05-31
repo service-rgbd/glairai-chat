@@ -59,11 +59,20 @@ export async function createCallSession(
     canPublishData: true,
   });
 
-  return {
+  const session = {
     conversationId: conversation.id,
     roomName,
     token: await accessToken.toJwt(),
     url: livekitUrl,
     type: input.type,
   };
+
+  await chatService.notifyIncomingCall(authToken, {
+    conversationId: conversation.id,
+    type: input.type,
+    callerUserId: currentUser.id,
+    callerName: currentUser.name,
+  });
+
+  return session;
 }
