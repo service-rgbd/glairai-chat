@@ -4,6 +4,11 @@ import { chatService } from "./chat-service";
 import { CallBusyError, CallForbiddenError, CallNotFoundError } from "./call-errors";
 import { findRingingCallForCalleeFromDb, isUserBusyInDb } from "./call-session-persistence";
 import {
+  getLiveKitConfig,
+  isLiveKitConfigured,
+  liveKitConfigHint,
+} from "./livekit-config";
+import {
   createCallSession as storeCreateCallSession,
   finalizeCall,
   findActiveCallByConversation,
@@ -21,13 +26,9 @@ export type CallRole = "caller" | "callee";
 
 const LIVEKIT_TOKEN_TTL_SECONDS = 10 * 60;
 
-const livekitUrl = process.env["LIVEKIT_URL"]?.trim() ?? "";
-const livekitApiKey = process.env["LIVEKIT_API_KEY"]?.trim() ?? "";
-const livekitApiSecret = process.env["LIVEKIT_API_SECRET"]?.trim() ?? "";
-
 function requireLiveKitConfig() {
-  if (!livekitUrl || !livekitApiKey || !livekitApiSecret) {
-    throw new Error("Configuration LiveKit manquante");
+  if (!isLiveKitConfigured()) {
+    throw new Error(`Configuration LiveKit manquante. ${liveKitConfigHint()}`);
   }
 }
 
@@ -42,6 +43,8 @@ async function buildLiveKitSession(
   input: { conversationId: string; type: CallType; callId: string },
 ) {
   requireLiveKitConfig();
+  const { url: livekitUrl, apiKey: livekitApiKey, apiSecret: livekitApiSecret } =
+    getLiveKitConfig();
 
   const currentUser = await chatService.getCurrentUser(authToken);
   const conversation = await chatService.getConversation(authToken, input.conversationId);
@@ -77,10 +80,20 @@ async function buildLiveKitSession(
     canPublishData: true,
   });
 
+  let token: string;
+  try {
+    token = await accessToken.toJwt();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Impossible de générer le token LiveKit (${detail}). ${liveKitConfigHint()}`,
+    );
+  }
+
   return {
     conversationId: conversation.id,
     roomName,
-    token: await accessToken.toJwt(),
+    token,
     url: livekitUrl,
     type: input.type,
     participantIds: conversation.participants.map((participant) => participant.userId),
