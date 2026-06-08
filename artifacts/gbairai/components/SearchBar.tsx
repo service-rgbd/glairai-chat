@@ -8,9 +8,10 @@ interface SearchBarProps {
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
+  autoFocus?: boolean;
 }
 
-export function SearchBar({ value, onChangeText, placeholder = "Rechercher..." }: SearchBarProps) {
+export function SearchBar({ value, onChangeText, placeholder = "Rechercher...", autoFocus }: SearchBarProps) {
   const colors = useColors();
   return (
     <View style={[styles.container, { backgroundColor: colors.input, borderColor: colors.border }]}>
@@ -22,6 +23,7 @@ export function SearchBar({ value, onChangeText, placeholder = "Rechercher..." }
         value={value}
         onChangeText={onChangeText}
         returnKeyType="search"
+        autoFocus={autoFocus}
       />
     </View>
   );

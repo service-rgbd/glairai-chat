@@ -1,8 +1,9 @@
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { GCall, GUser, formatTimestamp } from "@/contexts/ChatsContext";
+import type { GCall, GUser } from "@/contexts/chats-types";
+import { formatTimestamp } from "@/lib/format-timestamp";
 import { useColors } from "@/hooks/useColors";
 
 import { Avatar } from "./Avatar";
@@ -16,21 +17,29 @@ interface CallItemProps {
 export function CallItem({ call, user, onPress }: CallItemProps) {
   const colors = useColors();
   const isIncoming = call.direction === "incoming";
-  const iconColor = call.missed ? colors.missedCall : (isIncoming ? colors.accent : colors.primary);
+  const isNegative = call.failed || call.missed;
+  const iconColor = isNegative ? colors.missedCall : isIncoming ? colors.accent : colors.primary;
+
+  const getStatusLabel = () => {
+    const time = formatTimestamp(call.timestamp);
+    if (call.failed) return `${time} · Échec`;
+    if (call.missed) return "Appel manqué";
+    return time;
+  };
 
   return (
     <View style={[styles.container, { borderBottomColor: colors.border }]}>
       <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={52} showOnline isOnline={user.lastSeen === null} />
       <View style={styles.info}>
-        <Text style={[styles.name, { color: call.missed ? colors.missedCall : colors.text }]}>{user.name}</Text>
+        <Text style={[styles.name, { color: isNegative ? colors.missedCall : colors.text }]}>{user.name}</Text>
         <View style={styles.subRow}>
           <Ionicons
             name={isIncoming ? "arrow-down" : "arrow-up"}
             size={12}
             color={iconColor}
           />
-          <Text style={[styles.meta, { color: colors.mutedForeground }]}>
-            {call.type === "video" ? "Vidéo" : "Audio"} · {formatTimestamp(call.timestamp)}
+          <Text style={[styles.meta, { color: call.failed ? colors.missedCall : colors.mutedForeground }]}>
+            {call.type === "video" ? "Vidéo" : "Audio"} · {getStatusLabel()}
             {call.duration ? ` · ${call.duration}` : ""}
           </Text>
         </View>

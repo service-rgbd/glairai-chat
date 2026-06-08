@@ -1,7 +1,12 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { finalizeCall, getCallSession, markCallLogCreated } from "./call-session-store";
-import { encodeCallMessagePayload, type CallMessageOutcome } from "./call-messages";
+import { encodeCallMessagePayload, isCallMessageContent, type CallMessageOutcome } from "./call-messages";
+import {
+  encodeDeletedMessageContent,
+  encodeEditedTextMessageContent,
+  isDeletedMessageContent,
+} from "./message-meta";
 import {
   contactEdgesTable,
   conversationMembersTable,
@@ -16,6 +21,7 @@ import {
   sessionsTable,
   storiesTable,
   storyViewsTable,
+  userBlocksTable,
   usersTable,
 } from "@workspace/db";
 import { and, desc, eq, gte, inArray, like, lte, ne, or } from "drizzle-orm";
@@ -99,6 +105,7 @@ export interface ConversationSummary {
   createdBy: string;
   participants: ConversationParticipant[];
   unreadCount: number;
+  isArchived?: boolean;
   lastMessage?: ConversationMessage;
   lastReadMessageId: string | null;
 }
@@ -226,10 +233,7 @@ export interface ChatService {
     input: { content: string; type: MessageType },
     authenticatedUserId?: string,
   ): Awaitable<ConversationMessage>;
-  deleteConversationMessage(token: string, messageId: string): Awaitable<{
-    messageId: string;
-    conversationId: string;
-  }>;
+  deleteConversationMessage(token: string, messageId: string): Awaitable<ConversationMessage>;
   updateConversationMessage(
     token: string,
     messageId: string,
@@ -270,6 +274,14 @@ export interface ChatService {
     input: { pushToken: string; platform: string; deviceName: string },
   ): Awaitable<{ id: string; pushToken: string; platform: string; deviceName: string }>;
   listStories(token: string): Awaitable<{ stories: StorySummary[] }>;
+  blockUser(token: string, targetUserId: string): Awaitable<{ userId: string }>;
+  unblockUser(token: string, targetUserId: string): Awaitable<{ userId: string }>;
+  listBlockedUsers(token: string): Awaitable<{ userIds: string[] }>;
+  setConversationArchived(
+    token: string,
+    conversationId: string,
+    archived: boolean,
+  ): Awaitable<ConversationSummary>;
   createStory(
     token: string,
     input: { type: StoryType; content: string; backgroundColor?: string },
@@ -2201,12 +2213,26 @@ class DatabaseChatService implements ChatService {
     const sender = authenticatedUserId
       ? await this.requireUserById(authenticatedUserId)
       : await this.requireUserByToken(token);
-    const conversation = await this.requireConversationMembership(conversationId, sender.id);
+    await this.requireConversationMembership(conversationId, sender.id);
     const memberships = await db!
       .select()
       .from(conversationMembersTable)
       .where(eq(conversationMembersTable.conversationId, conversationId));
     const participantIds = memberships.map((membership) => membership.userId);
+
+    const [conversationRecord] = await db!
+      .select({ type: conversationsTable.type })
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, conversationId))
+      .limit(1);
+
+    if (conversationRecord?.type === "direct") {
+      const otherUserId = participantIds.find((participantId) => participantId !== sender.id);
+      if (otherUserId && (await this.isEitherBlocked(sender.id, otherUserId))) {
+        throw new Error("Impossible d'envoyer le message");
+      }
+    }
+
     const normalizedContent = input.content.trim();
 
     if (!normalizedContent) {
@@ -2337,61 +2363,35 @@ class DatabaseChatService implements ChatService {
 
     await this.requireConversationMembership(message.conversationId, user.id);
 
-    if (message.senderId !== user.id) {
-      throw new Error("Vous ne pouvez supprimer que vos propres messages");
+    if (isDeletedMessageContent(message.content)) {
+      throw new Error("Ce message a déjà été supprimé");
+    }
+
+    if (message.type === "text" && isCallMessageContent(message.content)) {
+      throw new Error("Ce message ne peut pas être supprimé");
     }
 
     if (Date.now() - message.createdAt.getTime() > MESSAGE_DELETE_WINDOW_MS) {
       throw new Error("Vous ne pouvez pas supprimer ce message après 15 minutes");
     }
 
-    const participantIds = await this.getConversationParticipantIds(message.conversationId);
-    const receipts = await db!
-      .select()
-      .from(messageReceiptsTable)
-      .where(eq(messageReceiptsTable.messageId, message.id));
-
-    for (const receipt of receipts) {
-      if (receipt.userId === user.id || receipt.readAt) {
-        continue;
-      }
-      const membership = await this.requireMembershipRecord(message.conversationId, receipt.userId);
-      await db!
-        .update(conversationMembersTable)
-        .set({ unreadCount: Math.max(0, membership.unreadCount - 1) })
-        .where(
-          and(
-            eq(conversationMembersTable.conversationId, message.conversationId),
-            eq(conversationMembersTable.userId, receipt.userId),
-          ),
-        );
-    }
-
-    await db!.delete(messagesTable).where(eq(messagesTable.id, message.id));
-
-    const [latestMessage] = await db!
-      .select({ createdAt: messagesTable.createdAt })
-      .from(messagesTable)
-      .where(eq(messagesTable.conversationId, message.conversationId))
-      .orderBy(desc(messagesTable.createdAt))
-      .limit(1);
-
+    const deletedContent = encodeDeletedMessageContent();
     await db!
-      .update(conversationsTable)
-      .set({ updatedAt: latestMessage?.createdAt ?? new Date() })
-      .where(eq(conversationsTable.id, message.conversationId));
+      .update(messagesTable)
+      .set({ content: deletedContent, type: "text" })
+      .where(eq(messagesTable.id, message.id));
+
+    const fullMessage = await this.toMessage(message.conversationId, message.id);
+    const participantIds = await this.getConversationParticipantIds(message.conversationId);
 
     this.publish({
-      type: "message.deleted",
+      type: "message.updated",
       participantIds,
       conversationId: message.conversationId,
-      messageId: message.id,
+      message: fullMessage,
     });
 
-    return {
-      messageId: message.id,
-      conversationId: message.conversationId,
-    };
+    return fullMessage;
   }
 
   async updateConversationMessage(
@@ -2416,6 +2416,10 @@ class DatabaseChatService implements ChatService {
       throw new Error("Vous ne pouvez modifier que vos propres messages");
     }
 
+    if (isDeletedMessageContent(message.content)) {
+      throw new Error("Ce message a été supprimé");
+    }
+
     if (Date.now() - message.createdAt.getTime() > MESSAGE_DELETE_WINDOW_MS) {
       throw new Error("Vous ne pouvez pas modifier ce message après 15 minutes");
     }
@@ -2432,9 +2436,14 @@ class DatabaseChatService implements ChatService {
       throw new Error("Message trop long");
     }
 
+    const editedContent = encodeEditedTextMessageContent(
+      normalizedContent,
+      new Date().toISOString(),
+    );
+
     await db!
       .update(messagesTable)
-      .set({ content: normalizedContent })
+      .set({ content: editedContent })
       .where(eq(messagesTable.id, message.id));
 
     const fullMessage = await this.toMessage(message.conversationId, message.id);
@@ -3559,6 +3568,7 @@ class DatabaseChatService implements ChatService {
       createdBy: conversation.createdBy,
       participants,
       unreadCount: membership.unreadCount,
+      isArchived: Boolean(membership.archivedAt),
       lastMessage: lastMessage ? await this.toMessage(conversationId, lastMessage.id) : undefined,
       lastReadMessageId: membership.lastReadMessageId,
     };
@@ -3651,9 +3661,81 @@ class DatabaseChatService implements ChatService {
       return true;
     }
 
+    if (await this.isEitherBlocked(viewerUserId, ownerUserId)) {
+      return false;
+    }
+
     const viewerHasOwner = await this.hasRegisteredContact(viewerUserId, ownerUserId);
     const ownerHasViewer = await this.hasRegisteredContact(ownerUserId, viewerUserId);
     return viewerHasOwner && ownerHasViewer;
+  }
+
+  private async isEitherBlocked(userA: string, userB: string) {
+    const [row] = await db!
+      .select({ blockerId: userBlocksTable.blockerId })
+      .from(userBlocksTable)
+      .where(
+        or(
+          and(eq(userBlocksTable.blockerId, userA), eq(userBlocksTable.blockedId, userB)),
+          and(eq(userBlocksTable.blockerId, userB), eq(userBlocksTable.blockedId, userA)),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  async blockUser(token: string, targetUserId: string) {
+    const user = await this.requireUserByToken(token);
+    if (targetUserId === user.id) {
+      throw new Error("Action impossible");
+    }
+
+    await db!.insert(userBlocksTable).values({
+      blockerId: user.id,
+      blockedId: targetUserId,
+      createdAt: new Date(),
+    }).onConflictDoNothing();
+
+    return { userId: targetUserId };
+  }
+
+  async unblockUser(token: string, targetUserId: string) {
+    const user = await this.requireUserByToken(token);
+    await db!
+      .delete(userBlocksTable)
+      .where(
+        and(
+          eq(userBlocksTable.blockerId, user.id),
+          eq(userBlocksTable.blockedId, targetUserId),
+        ),
+      );
+    return { userId: targetUserId };
+  }
+
+  async listBlockedUsers(token: string) {
+    const user = await this.requireUserByToken(token);
+    const rows = await db!
+      .select({ blockedId: userBlocksTable.blockedId })
+      .from(userBlocksTable)
+      .where(eq(userBlocksTable.blockerId, user.id));
+    return { userIds: rows.map((row) => row.blockedId) };
+  }
+
+  async setConversationArchived(token: string, conversationId: string, archived: boolean) {
+    const user = await this.requireUserByToken(token);
+    await this.requireConversationMembership(conversationId, user.id);
+
+    await db!
+      .update(conversationMembersTable)
+      .set({ archivedAt: archived ? new Date() : null })
+      .where(
+        and(
+          eq(conversationMembersTable.conversationId, conversationId),
+          eq(conversationMembersTable.userId, user.id),
+        ),
+      );
+
+    return this.toConversationSummary(conversationId, user.id);
   }
 
   private async ensureContactFromStoryReply(ownerUserId: string, viewerUserId: string) {

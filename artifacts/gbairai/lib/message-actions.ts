@@ -4,10 +4,11 @@ import { isCallMessageContent } from "@/lib/call-messages";
 export const MESSAGE_ACTION_WINDOW_MS = 15 * 60_000;
 
 export function getMessageActionAvailability(message: GMessage, currentUserId: string) {
-  if (message.type === "text" && isCallMessageContent(message.content)) {
+  if (message.isDeleted) {
     return { canEdit: false, canDelete: false, isWithinWindow: false };
   }
-  if (message.senderId !== currentUserId) {
+
+  if (message.type === "text" && isCallMessageContent(message.content)) {
     return { canEdit: false, canDelete: false, isWithinWindow: false };
   }
 
@@ -17,9 +18,10 @@ export function getMessageActionAvailability(message: GMessage, currentUserId: s
 
   const elapsedMs = Date.now() - new Date(message.timestamp).getTime();
   const isWithinWindow = elapsedMs <= MESSAGE_ACTION_WINDOW_MS;
+  const isOwnMessage = message.senderId === currentUserId;
 
   return {
-    canEdit: isWithinWindow && message.type === "text",
+    canEdit: isWithinWindow && isOwnMessage && message.type === "text",
     canDelete: isWithinWindow,
     isWithinWindow,
   };

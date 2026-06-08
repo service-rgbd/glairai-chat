@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "gbairai",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/icon.png",
       "resizeMode": "contain",
@@ -15,16 +14,24 @@
     },
     "ios": {
       "supportsTablet": false,
+      "bundleIdentifier": "com.gbairai.chat",
       "infoPlist": {
         "NSContactsUsageDescription": "Gbairai utilise vos contacts pour trouver les personnes déjà inscrites dans l'application.",
         "NSUserNotificationsUsageDescription": "Gbairai utilise les notifications pour vous prévenir des nouveaux messages.",
         "NSPhotoLibraryUsageDescription": "Gbairai utilise votre photothèque pour choisir une photo de profil.",
         "NSPhotoLibraryAddUsageDescription": "Gbairai peut enregistrer les photos et vidéos reçues dans votre galerie.",
         "NSCameraUsageDescription": "Gbairai utilise la caméra pour vos appels vidéo.",
-        "NSMicrophoneUsageDescription": "Gbairai utilise le microphone pour vos appels audio et vidéo."
-      }
+        "NSMicrophoneUsageDescription": "Gbairai utilise le microphone pour vos appels audio et vidéo.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ]
+      },
+      "bitcode": false
     },
     "android": {
+      "package": "com.gbairai.chat",
       "backgroundColor": "#0F172A",
       "permissions": [
         "READ_CONTACTS",
@@ -33,7 +40,16 @@
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
         "WAKE_LOCK",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
       ]
     },
     "web": {
@@ -46,23 +62,33 @@
           "origin": "https://replit.com/"
         }
       ],
-      "expo-font",
-      "expo-web-browser",
-      "expo-contacts",
-      "expo-notifications",
-      "@livekit/react-native-expo-plugin",
+      [
+        "@livekit/react-native-expo-plugin",
+        {
+          "android": {
+            "audioType": "communication"
+          }
+        }
+      ],
       "@config-plugins/react-native-webrtc",
-      "expo-build-properties",
-      "expo-audio",
-      "expo-media-library",
-      "expo-video"
+      "expo-dev-client",
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./assets/sounds/incoming.wav"]
+        }
+      ],
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
     },
     "extra": {
-      "apiBaseUrl": "https://glairai-chat.onrender.com"
-    }
+      "eas": {
+        "projectId": "21470a01-a774-4883-a20f-c93291f225a8"
+      }
+    },
+    "owner": "vini2427"
   }
 }

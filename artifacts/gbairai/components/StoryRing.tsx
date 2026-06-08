@@ -1,52 +1,74 @@
-import { LinearGradient } from "expo-linear-gradient";
+import { Image } from "expo-image";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { GStory, GUser } from "@/contexts/ChatsContext";
+import type { GStory, GUser } from "@/contexts/chats-types";
 import { useColors } from "@/hooks/useColors";
+import { getDisplayMediaUrl, parseStoryMediaPayload } from "@/lib/media";
 
 import { Avatar } from "./Avatar";
 
 interface StoryRingProps {
   user: GUser;
   stories: GStory[];
+  currentUserId?: string;
   isMe?: boolean;
   onPress: () => void;
   size?: number;
 }
 
-export function StoryRing({ user, stories, isMe = false, onPress, size = 62 }: StoryRingProps) {
+export function StoryRing({
+  user,
+  stories,
+  currentUserId = "me",
+  isMe = false,
+  onPress,
+  size = 62,
+}: StoryRingProps) {
   const colors = useColors();
-  const hasUnseen = stories.some((s) => !s.viewerIds.includes("me"));
+  const hasUnseen = stories.some((s) => !s.viewerIds.includes(currentUserId));
   const hasStory = stories.length > 0;
-  const ringSize = size + 6;
+  const latest = stories[stories.length - 1];
+  const mediaPayload = latest?.type !== "text" && latest ? parseStoryMediaPayload(latest.content) : null;
+  const mediaUrl = mediaPayload ? getDisplayMediaUrl(mediaPayload.key, mediaPayload.url) : null;
+  const storyThumbnailUrl = mediaPayload?.thumbnailUrl
+    ? getDisplayMediaUrl("", mediaPayload.thumbnailUrl)
+    : null;
+  const avatarSize = Math.min(size, 36);
 
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.8}>
-      {isMe ? (
-        <View style={[styles.ring, { width: ringSize, height: ringSize, borderRadius: ringSize / 2, borderColor: colors.border, borderWidth: 1.5 }]}>
-          <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={size} />
+    <TouchableOpacity
+      style={[
+        styles.container,
+        {
+          backgroundColor: latest?.backgroundColor ?? colors.card,
+          borderColor: hasStory && hasUnseen ? colors.primary : colors.border,
+        },
+      ]}
+      onPress={onPress}
+      activeOpacity={0.84}
+    >
+      {latest?.type === "image" && mediaUrl ? (
+        <Image source={{ uri: mediaUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+      ) : latest?.type === "video" ? (
+        storyThumbnailUrl ? (
+          <Image source={{ uri: storyThumbnailUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+        ) : (
+          <View style={styles.videoBg}>
+            <Text style={styles.playIcon}>▶</Text>
+          </View>
+        )
+      ) : null}
+      <View style={styles.overlay} />
+      <View style={styles.avatarArea}>
+        <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={avatarSize} />
+        {isMe ? (
           <View style={[styles.addBadge, { backgroundColor: colors.primary }]}>
             <Text style={styles.addIcon}>+</Text>
           </View>
-        </View>
-      ) : hasStory ? (
-        <LinearGradient
-          colors={hasUnseen ? ["#6D4AFF", "#00D4A4"] : [colors.muted, colors.muted]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.ring, { width: ringSize, height: ringSize, borderRadius: ringSize / 2, padding: 2.5 }]}
-        >
-          <View style={[styles.innerRing, { borderRadius: (ringSize - 5) / 2, backgroundColor: colors.background }]}>
-            <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={size} />
-          </View>
-        </LinearGradient>
-      ) : (
-        <View style={[styles.ring, { width: ringSize, height: ringSize, borderRadius: ringSize / 2, borderColor: colors.border, borderWidth: 1.5 }]}>
-          <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={size} />
-        </View>
-      )}
-      <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+        ) : null}
+      </View>
+      <Text style={styles.name} numberOfLines={2}>
         {isMe ? "Mon statut" : user.name.split(" ")[0]}
       </Text>
     </TouchableOpacity>
@@ -55,27 +77,36 @@ export function StoryRing({ user, stories, isMe = false, onPress, size = 62 }: S
 
 const styles = StyleSheet.create({
   container: {
-    alignItems: "center",
-    width: 76,
-    gap: 6,
+    width: 104,
+    height: 152,
+    borderRadius: 18,
+    borderWidth: 2,
+    overflow: "hidden",
+    padding: 10,
+    justifyContent: "space-between",
   },
-  ring: {
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
+  videoBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#111827",
     justifyContent: "center",
     alignItems: "center",
   },
-  innerRing: {
-    flex: 1,
-    width: "100%",
-    justifyContent: "center",
-    alignItems: "center",
+  playIcon: {
+    color: "#fff",
+    fontSize: 28,
   },
+  avatarArea: { alignSelf: "flex-start" },
   addBadge: {
     position: "absolute",
-    bottom: 0,
-    right: 0,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    bottom: -4,
+    right: -4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -86,9 +117,11 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   name: {
-    fontSize: 11.5,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    width: 70,
+    color: "#fff",
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 });

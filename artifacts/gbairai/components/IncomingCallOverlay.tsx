@@ -127,6 +127,7 @@ export function IncomingCallOverlay() {
         }
       }
       recordCall({
+        id: `calllog_${incoming.callId}`,
         userId: incoming.callerUserId,
         conversationId: incoming.conversationId,
         type: incoming.callType,

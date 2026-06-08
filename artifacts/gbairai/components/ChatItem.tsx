@@ -6,6 +6,7 @@ import type { GChat, GMessage, GStory, GUser } from "@/contexts/chats-types";
 import { formatTimestamp } from "@/lib/format-timestamp";
 import { getEmoji3dPayloadFromContent } from "@/lib/emoji-messages";
 import { getCallMessagePreview } from "@/lib/call-messages";
+import { DELETED_MESSAGE_LABEL } from "@/lib/message-meta";
 import { getGroupDisplayColor, getGroupDisplayInitials } from "@/lib/group-utils";
 import { useColors } from "@/hooks/useColors";
 
@@ -54,6 +55,9 @@ export function ChatItem({
     if (typingLabel) return typingLabel;
     if (!lastMessage) return "Démarrer une conversation";
     const prefix = lastMessage.senderId === currentUserId ? "Vous: " : (isGroup ? `${users[lastMessage.senderId]?.name?.split(" ")[0] ?? ""}: ` : "");
+    if (lastMessage.isDeleted) {
+      return prefix + DELETED_MESSAGE_LABEL;
+    }
     const callPreview =
       lastMessage.type === "text"
         ? getCallMessagePreview(lastMessage.content, currentUserId, lastMessage.senderId)

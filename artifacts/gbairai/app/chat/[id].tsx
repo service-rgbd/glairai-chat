@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
 import { ChatInput } from "@/components/ChatInput";
+import { ChatOptionsSheet } from "@/components/ChatOptionsSheet";
 import { ChatWallpaper } from "@/components/ChatWallpaper";
 import { MessageActionsModal } from "@/components/MessageActionsModal";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -27,6 +28,7 @@ import {
   getDeleteMessageTitle,
   getMessageActionAvailability,
 } from "@/lib/message-actions";
+import { openGlobalSearch } from "@/lib/navigation";
 
 export default function ChatScreen() {
   const { id, recordVoice } = useLocalSearchParams<{ id: string; recordVoice?: string }>();
@@ -53,6 +55,10 @@ export default function ChatScreen() {
     loadConversationMessages,
     joinConversationRealtime,
     leaveConversationRealtime,
+    blockUser,
+    unblockUser,
+    archiveConversation,
+    isUserBlocked,
   } = useChats();
   const listRef = useRef<FlatList<GMessage>>(null);
   const currentUserId = currentUser?.id ?? "me";
@@ -60,6 +66,7 @@ export default function ChatScreen() {
   const [editingMessage, setEditingMessage] = useState<GMessage | null>(null);
   const [showActionsModal, setShowActionsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showChatOptions, setShowChatOptions] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const chat = chats.find((c) => c.id === id);
@@ -86,6 +93,7 @@ export default function ChatScreen() {
     : (otherUser?.initials ?? "??");
   const avatarColor = isGroup ? getGroupDisplayColor(chat?.id ?? "") : (otherUser?.color ?? colors.primary);
   const avatarUri = isGroup ? (chat?.avatarUrl ?? null) : (otherUser?.avatar ?? null);
+  const isBlockedContact = !isGroup && otherUser ? isUserBlocked(otherUser.id) : false;
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -117,7 +125,7 @@ export default function ChatScreen() {
   };
 
   const openCall = (type: "audio" | "video") => {
-    if (!id || !otherUser || isGroup) return;
+    if (!id || !otherUser || isGroup || isBlockedContact) return;
     const callId = startOutgoingCall({
       userId: otherUser.id,
       conversationId: id,
@@ -321,7 +329,9 @@ export default function ChatScreen() {
             onPress={() => {
               if (isGroup && id) {
                 router.push(`/group/${id}`);
+                return;
               }
+              setShowChatOptions(true);
             }}
           >
             <Feather name="more-vertical" size={20} color={colors.text} />
@@ -353,6 +363,14 @@ export default function ChatScreen() {
             }
           />
         </View>
+        {isBlockedContact ? (
+          <View style={[styles.blockedBanner, { backgroundColor: colors.muted }]}>
+            <Text style={[styles.blockedBannerText, { color: colors.mutedForeground }]}>
+              Vous avez bloqué {otherUser?.name?.split(" ")[0] ?? "cet utilisateur"}. Vous ne recevrez plus ses messages.
+            </Text>
+          </View>
+        ) : null}
+        {!isBlockedContact ? (
         <ChatInput
           conversationId={id}
           autoStartVoiceRecording={recordVoice === "1"}
@@ -376,6 +394,7 @@ export default function ChatScreen() {
           }}
           bottomInset={bottomPad}
         />
+        ) : null}
       </KeyboardAvoidingView>
 
       <MessageActionsModal
@@ -398,6 +417,98 @@ export default function ChatScreen() {
           handleDeleteMessage(message);
         }}
       />
+
+      {!isGroup && otherUser ? (
+        <ChatOptionsSheet
+          visible={showChatOptions}
+          onClose={() => setShowChatOptions(false)}
+          title={displayName}
+          options={[
+            {
+              key: "search",
+              label: "Rechercher",
+              icon: "search-outline",
+              onPress: () => openGlobalSearch(),
+            },
+            {
+              key: "archive",
+              label: chat?.isArchived ? "Désarchiver" : "Archiver",
+              icon: chat?.isArchived ? "archive-outline" : "archive-outline",
+              onPress: () => {
+                if (!id) return;
+                void archiveConversation(id, !chat?.isArchived)
+                  .then(() => {
+                    if (!chat?.isArchived) {
+                      router.back();
+                    }
+                  })
+                  .catch((error) => {
+                    Alert.alert(
+                      "Action impossible",
+                      error instanceof Error ? error.message : "Impossible d'archiver cette conversation.",
+                    );
+                  });
+              },
+            },
+            {
+              key: "report",
+              label: "Signaler",
+              icon: "flag-outline",
+              onPress: () => {
+                Alert.alert(
+                  "Signalement envoyé",
+                  "Merci. Notre équipe examinera ce signalement.",
+                );
+              },
+            },
+            {
+              key: "block",
+              label: isBlockedContact ? "Débloquer" : `Bloquer ${otherUser.name.split(" ")[0]}`,
+              icon: "ban-outline",
+              destructive: !isBlockedContact,
+              onPress: () => {
+                if (isBlockedContact) {
+                  Alert.alert(
+                    "Débloquer",
+                    `Autoriser à nouveau ${otherUser.name} ?`,
+                    [
+                      { text: "Annuler", style: "cancel" },
+                      {
+                        text: "Débloquer",
+                        onPress: () => {
+                          void unblockUser(otherUser.id).catch(() => undefined);
+                        },
+                      },
+                    ],
+                  );
+                  return;
+                }
+                Alert.alert(
+                  "Bloquer",
+                  `${otherUser.name} ne pourra plus vous contacter et ses statuts seront masqués.`,
+                  [
+                    { text: "Annuler", style: "cancel" },
+                    {
+                      text: "Bloquer",
+                      style: "destructive",
+                      onPress: () => {
+                        void blockUser(otherUser.id)
+                          .then(() => router.back())
+                          .catch((error) => {
+                            Alert.alert(
+                              "Action impossible",
+                              error instanceof Error ? error.message : "Impossible de bloquer cet utilisateur.",
+                            );
+                          });
+                      },
+                    },
+                  ],
+                );
+              },
+            },
+          ]}
+        />
+      ) : null}
 
       <MessageEditModal
         visible={showEditModal}
@@ -480,5 +591,15 @@ const styles = StyleSheet.create({
   dateSeparatorText: {
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
+  },
+  blockedBanner: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  blockedBannerText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    textAlign: "center",
+    lineHeight: 18,
   },
 });

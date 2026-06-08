@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { Avatar } from "@/components/Avatar";
@@ -40,7 +40,6 @@ export function VoiceNoteBubble({
   const colors = useColors();
   const player = useAudioPlayer(audioPayload.url, { updateInterval: 80 });
   const playerStatus = useAudioPlayerStatus(player);
-  const [waveformWidth, setWaveformWidth] = useState(0);
 
   const totalDuration = useMemo(() => {
     if (playerStatus.duration && playerStatus.duration > 0) {
@@ -52,7 +51,6 @@ export function VoiceNoteBubble({
   const currentTime = Math.max(0, playerStatus.currentTime || 0);
   const playbackProgress =
     totalDuration > 0 ? Math.min(currentTime / totalDuration, 1) : 0;
-  const scrubberLeft = playbackProgress * Math.max(waveformWidth - 8, 0);
   const audioDisplaySeconds = player.playing ? currentTime : totalDuration || audioPayload.durationSeconds;
 
   const togglePlayback = () => {
@@ -81,10 +79,7 @@ export function VoiceNoteBubble({
       </TouchableOpacity>
 
       <View style={styles.voiceWaveWrap}>
-        <View
-          style={styles.waveformRow}
-          onLayout={(event) => setWaveformWidth(event.nativeEvent.layout.width)}
-        >
+        <View style={styles.waveformRow}>
           {WAVEFORM_BARS.map((value, index) => {
             const barEnd = (index + 1) / WAVEFORM_BARS.length;
             const isPlayed = barEnd <= playbackProgress;
@@ -107,15 +102,6 @@ export function VoiceNoteBubble({
               />
             );
           })}
-          <View
-            style={[
-              styles.waveformScrubber,
-              { left: scrubberLeft },
-              {
-                backgroundColor: isMe ? colors.chatBubbleSentText : colors.primary,
-              },
-            ]}
-          />
         </View>
         <View style={styles.voiceMetaRow}>
           <Text
@@ -186,19 +172,10 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 2,
     height: 28,
-    position: "relative",
   },
   waveformBar: {
     width: 3,
     borderRadius: 999,
-  },
-  waveformScrubber: {
-    position: "absolute",
-    top: 4,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: -4,
   },
   voiceMetaRow: {
     flexDirection: "row",

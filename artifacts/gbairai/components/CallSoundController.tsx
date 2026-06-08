@@ -1,0 +1,51 @@
+import { useAudioPlayer } from "expo-audio";
+import React, { useEffect, useMemo } from "react";
+
+import type { CallSoundPhase } from "@/lib/call-audio";
+import { getCallRingtoneAsset, useCallRingtone } from "@/lib/call-ringtone";
+
+type Props = {
+  phase: CallSoundPhase;
+  variant?: "outgoing" | "incoming";
+};
+
+export function CallSoundController({ phase, variant = "outgoing" }: Props) {
+  const { ringtoneId } = useCallRingtone();
+  const ringAsset = useMemo(
+    () => getCallRingtoneAsset(ringtoneId, variant === "incoming" ? "incoming" : "outgoing"),
+    [ringtoneId, variant],
+  );
+
+  const ringPlayer = useAudioPlayer(ringAsset);
+  const connect = useAudioPlayer(require("@/assets/sounds/connect.wav"));
+  const end = useAudioPlayer(require("@/assets/sounds/end.wav"));
+
+  useEffect(() => {
+    ringPlayer.loop = true;
+  }, [ringPlayer]);
+
+  useEffect(() => {
+    ringPlayer.pause();
+    connect.pause();
+    end.pause();
+
+    if (phase === "ringing") {
+      ringPlayer.seekTo(0);
+      ringPlayer.play();
+      return;
+    }
+
+    if (phase === "connected") {
+      connect.seekTo(0);
+      connect.play();
+      return;
+    }
+
+    if (phase === "ended") {
+      end.seekTo(0);
+      end.play();
+    }
+  }, [phase, ringPlayer, connect, end]);
+
+  return null;
+}

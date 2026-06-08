@@ -1,3 +1,5 @@
+import "react-native-gesture-handler";
+
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -5,29 +7,56 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { isExpoGo } from "@/lib/runtime-env";
+
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { IncomingCallOverlay } from "@/components/IncomingCallOverlay";
+import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatsProvider } from "@/contexts/ChatsContext";
+import { queryClient } from "@/lib/query-client";
+import { getApiBaseUrl } from "@/lib/api-config";
+import { setupPushNotificationRouting } from "@/lib/notifications";
 
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+function AppShell({ children }: { children: React.ReactNode }) {
+  const [KeyboardProvider, setKeyboardProvider] =
+    React.useState<React.ComponentType<{ children: React.ReactNode }> | null>(null);
 
-function RootLayoutNav() {
+  useEffect(() => {
+    if (isExpoGo()) return;
+    void import("react-native-keyboard-controller").then((module) => {
+      setKeyboardProvider(() => module.KeyboardProvider);
+    });
+  }, []);
+
+  if (!KeyboardProvider) {
+    return <>{children}</>;
+  }
+
+  return <KeyboardProvider>{children}</KeyboardProvider>;
+}
+
+function RootStack() {
   return (
     <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="search" options={{ headerShown: false }} />
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="chat/[id]" />
+      <Stack.Screen name="group/[id]" />
+      <Stack.Screen name="group/join" />
+      <Stack.Screen name="media-viewer" options={{ presentation: "fullScreenModal" }} />
+      <Stack.Screen name="call/[conversationId]" />
       <Stack.Screen name="story/[id]" options={{ presentation: "fullScreenModal" }} />
       <Stack.Screen name="profile/[id]" />
     </Stack>
@@ -43,25 +72,37 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
+    if (__DEV__) {
+      console.log("[Gbairai] démarrage — API:", getApiBaseUrl());
+    }
+    void SplashScreen.hideAsync();
+  }, []);
+
+  useEffect(() => {
+    return setupPushNotificationRouting();
+  }, []);
+
+  useEffect(() => {
     if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
+      void SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
-
-  if (!fontsLoaded && !fontError) return null;
 
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
-            <ChatsProvider>
-              <GestureHandlerRootView style={{ flex: 1 }}>
-                <KeyboardProvider>
-                  <RootLayoutNav />
-                </KeyboardProvider>
-              </GestureHandlerRootView>
-            </ChatsProvider>
+            <PersistedQueryProvider>
+              <ChatsProvider>
+                <GestureHandlerRootView style={{ flex: 1 }}>
+                  <AppShell>
+                    <IncomingCallOverlay />
+                    <RootStack />
+                  </AppShell>
+                </GestureHandlerRootView>
+              </ChatsProvider>
+            </PersistedQueryProvider>
           </AuthProvider>
         </QueryClientProvider>
       </ErrorBoundary>

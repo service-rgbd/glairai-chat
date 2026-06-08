@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 
 export default function Index() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, needsProfileSetup } = useAuth();
   const colors = useColors();
 
   if (isLoading) {
@@ -18,6 +18,9 @@ export default function Index() {
   }
 
   if (isAuthenticated) {
+    if (needsProfileSetup) {
+      return <Redirect href="/(auth)/profile-setup" />;
+    }
     return <Redirect href="/(tabs)" />;
   }
 

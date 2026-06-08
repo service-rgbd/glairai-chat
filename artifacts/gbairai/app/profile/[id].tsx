@@ -2,23 +2,27 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import React from "react";
-import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
-import { useChats } from "@/contexts/ChatsContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { formatTimestamp } from "@/lib/format-timestamp";
+import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 
 export default function ProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { users, chats } = useChats();
+  const { currentUser } = useAuth();
+  const { users, chats, startOutgoingCall, blockUser, unblockUser, isUserBlocked } = useChats();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const currentUserId = currentUser?.id ?? "me";
 
   const user = id ? users[id] : undefined;
-  const chat = chats.find((c) => c.participantIds.includes(id ?? "") && c.participantIds.includes("me") && c.type === "direct");
+  const chat = chats.find((c) => c.participantIds.includes(id ?? "") && c.participantIds.includes(currentUserId) && c.type === "direct");
 
   if (!user) {
     return (
@@ -29,6 +33,26 @@ export default function ProfileScreen() {
   }
 
   const isOnline = user.lastSeen === null;
+  const lastSeenLabel = isOnline
+    ? "En ligne"
+    : user.lastSeen
+      ? `Vu ${formatTimestamp(user.lastSeen)}`
+      : "Hors ligne";
+
+  const isBlocked = isUserBlocked(user.id);
+
+  const openCall = (type: "audio" | "video") => {
+    if (!chat || !user || isBlocked) return;
+    const callId = startOutgoingCall({
+      userId: user.id,
+      conversationId: chat.id,
+      type,
+    });
+    router.push({
+      pathname: "/call/[conversationId]",
+      params: { conversationId: chat.id, type, callId },
+    });
+  };
 
   const ActionButton = ({ icon, label, onPress }: { icon: React.ReactNode; label: string; onPress: () => void }) => (
     <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.card }]} onPress={onPress} activeOpacity={0.8}>
@@ -53,9 +77,7 @@ export default function ProfileScreen() {
           <View style={styles.avatarSection}>
             <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={100} showOnline isOnline={isOnline} />
             <Text style={styles.profileName}>{user.name}</Text>
-            <Text style={styles.profileStatus}>
-              {isOnline ? "En ligne" : "Vu récemment"}
-            </Text>
+            <Text style={styles.profileStatus}>{lastSeenLabel}</Text>
           </View>
         </LinearGradient>
 
@@ -68,12 +90,12 @@ export default function ProfileScreen() {
           <ActionButton
             icon={<Ionicons name="call-outline" size={22} color={colors.primary} />}
             label="Appel"
-            onPress={() => {}}
+            onPress={() => openCall("audio")}
           />
           <ActionButton
             icon={<Ionicons name="videocam-outline" size={22} color={colors.primary} />}
             label="Vidéo"
-            onPress={() => {}}
+            onPress={() => openCall("video")}
           />
           <ActionButton
             icon={<Feather name="more-horizontal" size={22} color={colors.primary} />}
@@ -100,12 +122,46 @@ export default function ProfileScreen() {
         </View>
 
         <View style={[styles.dangerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.dangerRow}
+            activeOpacity={0.7}
+            onPress={() => {
+              if (isBlocked) {
+                void unblockUser(user.id);
+                return;
+              }
+              Alert.alert(
+                "Bloquer",
+                `${user.name} ne pourra plus vous contacter et ses statuts seront masqués.`,
+                [
+                  { text: "Annuler", style: "cancel" },
+                  {
+                    text: "Bloquer",
+                    style: "destructive",
+                    onPress: () => {
+                      void blockUser(user.id).then(() => router.back());
+                    },
+                  },
+                ],
+              );
+            }}
+          >
             <Ionicons name="ban-outline" size={20} color={colors.destructive} />
-            <Text style={[styles.dangerText, { color: colors.destructive }]}>Bloquer {user.name.split(" ")[0]}</Text>
+            <Text style={[styles.dangerText, { color: colors.destructive }]}>
+              {isBlocked ? "Débloquer" : `Bloquer ${user.name.split(" ")[0]}`}
+            </Text>
           </TouchableOpacity>
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.dangerRow}
+            activeOpacity={0.7}
+            onPress={() => {
+              Alert.alert(
+                "Signalement envoyé",
+                "Merci. Notre équipe examinera ce signalement.",
+              );
+            }}
+          >
             <Ionicons name="flag-outline" size={20} color={colors.destructive} />
             <Text style={[styles.dangerText, { color: colors.destructive }]}>Signaler</Text>
           </TouchableOpacity>

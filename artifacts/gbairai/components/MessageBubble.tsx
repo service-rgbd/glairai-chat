@@ -14,6 +14,7 @@ import {
   getCallMessagePayloadFromContent,
   isCallMessageNegative,
 } from "@/lib/call-messages";
+import { DELETED_MESSAGE_LABEL } from "@/lib/message-meta";
 import { getEmoji3dDisplayUrl, getEmoji3dPayloadFromContent } from "@/lib/emoji-messages";
 import {
   getDisplayMediaUrl,
@@ -43,13 +44,17 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const colors = useColors();
   const { messageFontSize, metaFontSize } = useChatFontScale();
-  const audioPayload = message.type === "audio" ? parseAudioMessagePayload(message.content) : null;
-  const imagePayload = message.type === "image" ? parseImageMessagePayload(message.content) : null;
-  const videoPayload = message.type === "video" ? parseVideoMessagePayload(message.content) : null;
+  const isDeletedMessage = Boolean(message.isDeleted);
+  const audioPayload =
+    !isDeletedMessage && message.type === "audio" ? parseAudioMessagePayload(message.content) : null;
+  const imagePayload =
+    !isDeletedMessage && message.type === "image" ? parseImageMessagePayload(message.content) : null;
+  const videoPayload =
+    !isDeletedMessage && message.type === "video" ? parseVideoMessagePayload(message.content) : null;
   const emoji3dPayload =
-    message.type === "text" ? getEmoji3dPayloadFromContent(message.content) : null;
+    !isDeletedMessage && message.type === "text" ? getEmoji3dPayloadFromContent(message.content) : null;
   const callPayload =
-    message.type === "text" && !emoji3dPayload
+    !isDeletedMessage && message.type === "text" && !emoji3dPayload
       ? getCallMessagePayloadFromContent(message.content)
       : null;
   const resolvedImageUrl = imagePayload ? getDisplayMediaUrl(imagePayload.key, imagePayload.url) : null;
@@ -164,7 +169,19 @@ export function MessageBubble({
         {showSenderName && sender && (
           <Text style={[styles.senderName, { color: sender.color }]}>{sender.name}</Text>
         )}
-        {audioPayload ? (
+        {isDeletedMessage ? (
+          <Text
+            style={[
+              styles.deletedText,
+              {
+                color: isMe ? "rgba(255,255,255,0.72)" : colors.mutedForeground,
+                fontSize: messageFontSize,
+              },
+            ]}
+          >
+            {DELETED_MESSAGE_LABEL}
+          </Text>
+        ) : audioPayload ? (
           <VoiceNoteBubble
             messageId={message.id}
             audioPayload={audioPayload}
@@ -306,6 +323,19 @@ export function MessageBubble({
         ) : null}
         {!hideDefaultMeta ? (
           <View style={styles.meta}>
+            {message.editedAt ? (
+              <Text
+                style={[
+                  styles.editedLabel,
+                  {
+                    color: isMe ? "rgba(255,255,255,0.65)" : colors.mutedForeground,
+                    fontSize: metaFontSize,
+                  },
+                ]}
+              >
+                modifié
+              </Text>
+            ) : null}
             <Text
               style={[
                 styles.time,
@@ -363,6 +393,14 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontFamily: "Inter_400Regular",
     lineHeight: 24,
+  },
+  deletedText: {
+    fontFamily: "Inter_400Regular",
+    fontStyle: "italic",
+    lineHeight: 24,
+  },
+  editedLabel: {
+    fontFamily: "Inter_400Regular",
   },
   mediaWrap: {
     position: "relative",

@@ -3,8 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AuthLogo } from "@/components/AuthLogo";
+import { SafeKeyboardAvoidingView } from "@/components/SafeKeyboardAvoidingView";
 import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { isOtpDemoDevMode } from "@/lib/api-config";
@@ -28,6 +29,7 @@ export default function OtpScreen() {
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(59);
   const inputRefs = useRef<(TextInput | null)[]>([]);
+  const autoFilledRef = useRef(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -41,15 +43,12 @@ export default function OtpScreen() {
     if (!isOtpDemoDevMode() || !pendingOtpCode || pendingOtpCode.length !== CODE_LENGTH) {
       return;
     }
+    if (autoFilledRef.current) {
+      return;
+    }
+    autoFilledRef.current = true;
     setDigits(pendingOtpCode.split("").slice(0, CODE_LENGTH));
   }, [pendingOtpCode]);
-
-  useEffect(() => {
-    const code = digits.join("");
-    if (code.length === CODE_LENGTH) {
-      handleVerify(code);
-    }
-  }, [digits]);
 
   const handleDigit = (index: number, val: string) => {
     const digit = val.replace(/\D/g, "").slice(-1);
@@ -71,12 +70,11 @@ export default function OtpScreen() {
   };
 
   const handleVerify = async (_code: string) => {
+    if (loading) return;
     setLoading(true);
     try {
       const user = await verifyPendingOtp(_code);
-      setTimeout(() => {
-        router.replace(user.isOnboarded ? "/" : "/(auth)/profile-setup");
-      }, 0);
+      router.replace(user.isOnboarded ? "/" : "/(auth)/profile-setup");
     } catch (error) {
       Alert.alert(
         "Code invalide",
@@ -92,9 +90,21 @@ export default function OtpScreen() {
   const isFull = digits.every((d) => d !== "");
 
   return (
-    <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.background }]} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-      <View style={[styles.content, { paddingTop: topPad + 20, paddingBottom: bottomPad + 24 }]}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+    <SafeKeyboardAvoidingView
+      style={[styles.root, { backgroundColor: colors.background }]}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === "ios" ? topPad : 0}
+    >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: topPad + 20, paddingBottom: 16 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.replace("/(auth)/phone")}>
           <Text style={[styles.backText, { color: colors.primary }]}>‹ Retour</Text>
         </TouchableOpacity>
 
@@ -177,7 +187,9 @@ export default function OtpScreen() {
             </TouchableOpacity>
           )}
         </View>
+      </ScrollView>
 
+      <View style={[styles.footer, { paddingBottom: bottomPad + 16 }]}>
         <TouchableOpacity
           style={[styles.btn, { backgroundColor: isFull ? colors.primary : colors.muted }]}
           onPress={() => handleVerify(digits.join(""))}
@@ -191,16 +203,21 @@ export default function OtpScreen() {
           )}
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </SafeKeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: {
-    flex: 1,
+  scroll: { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
     paddingHorizontal: 24,
     gap: 24,
+  },
+  footer: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
   },
   backBtn: { alignSelf: "flex-start" },
   backText: { fontSize: 17, fontFamily: "Inter_500Medium" },
@@ -251,7 +268,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: "auto",
   },
   btnText: { fontSize: 17, fontFamily: "Inter_600SemiBold" },
 });

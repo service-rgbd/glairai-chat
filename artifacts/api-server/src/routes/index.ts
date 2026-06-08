@@ -10,12 +10,14 @@ import mediaRouter from "./media";
 import metadataRouter from "./metadata";
 import meRouter from "./me";
 import storiesRouter from "./stories";
+import usersRouter from "./users";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
 router.use(meRouter);
+router.use(usersRouter);
 router.use(conversationsRouter);
 router.use(callsRouter);
 router.use(contactsRouter);

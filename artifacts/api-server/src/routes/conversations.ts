@@ -374,4 +374,27 @@ router.post(
   },
 );
 
+router.patch(
+  "/conversations/:conversationId/archive",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const archived = req.body?.archived === true;
+      const result = await chatService.setConversationArchived(
+        req.authToken!,
+        getSingleParam(req.params["conversationId"]),
+        archived,
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible de mettre à jour l'archivage",
+      });
+    }
+  },
+);
+
 export default router;

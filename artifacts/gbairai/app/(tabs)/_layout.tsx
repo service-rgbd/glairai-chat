@@ -1,120 +1,43 @@
-import { BlurView } from "expo-blur";
-import { isLiquidGlassAvailable } from "expo-glass-effect";
-import { Tabs } from "expo-router";
-import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Redirect, Stack } from "expo-router";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 
+import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 
-function NativeTabLayout() {
-  return (
-    <NativeTabs>
-      <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "message", selected: "message.fill" }} />
-        <Label>Discussions</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="status">
-        <Icon sf={{ default: "circle.dotted", selected: "circle.fill" }} />
-        <Label>Statuts</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="calls">
-        <Icon sf={{ default: "phone", selected: "phone.fill" }} />
-        <Label>Appels</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="settings">
-        <Icon sf={{ default: "person.circle", selected: "person.circle.fill" }} />
-        <Label>Réglages</Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
-  );
-}
-
-function ClassicTabLayout() {
+export default function TabsRootLayout() {
+  const { isAuthenticated, isLoading } = useAuth();
   const colors = useColors();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
-  const isIOS = Platform.OS === "ios";
-  const isWeb = Platform.OS === "web";
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background }}>
+        <ActivityIndicator color={colors.primary} size="large" />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/(auth)/welcome" />;
+  }
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.mutedForeground,
-        headerShown: false,
-        tabBarStyle: {
-          position: "absolute",
-          backgroundColor: isIOS ? "transparent" : colors.tabBarBg,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: colors.border,
-          elevation: 0,
-          height: isWeb ? 84 : 60,
-        },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView
-              intensity={100}
-              tint={isDark ? "dark" : "light"}
-              style={StyleSheet.absoluteFill}
-            />
-          ) : isWeb ? (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.tabBarBg }]} />
-          ) : null,
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontFamily: "Inter_500Medium",
-          marginBottom: 4,
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(main)" />
+      <Stack.Screen
+        name="search"
         options={{
-          title: "Discussions",
-          tabBarIcon: ({ color, focused }) =>
-            isIOS ? (
-              <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} size={24} color={color} />
-            ) : (
-              <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} size={22} color={color} />
-            ),
+          animation: "slide_from_bottom",
+          presentation: "card",
         }}
       />
-      <Tabs.Screen
-        name="status"
+      <Stack.Screen
+        name="chat-wallpaper"
         options={{
-          title: "Statuts",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "aperture" : "aperture-outline"} size={22} color={color} />
-          ),
+          animation: "slide_from_right",
+          presentation: "card",
         }}
       />
-      <Tabs.Screen
-        name="calls"
-        options={{
-          title: "Appels",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "call" : "call-outline"} size={22} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: "Réglages",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "person-circle" : "person-circle-outline"} size={24} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+    </Stack>
   );
-}
-
-export default function TabLayout() {
-  if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout />;
-  }
-  return <ClassicTabLayout />;
 }

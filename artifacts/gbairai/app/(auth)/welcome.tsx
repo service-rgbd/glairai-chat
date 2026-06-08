@@ -1,8 +1,16 @@
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import React from "react";
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const FEATURES = [
+  { label: "Messages instantanés", icon: "chatbubbles" as const },
+  { label: "Appels audio & vidéo", icon: "call" as const },
+  { label: "Statuts & Stories", icon: "albums" as const },
+];
 
 export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
@@ -11,34 +19,46 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient
-        colors={["#0F172A", "#1a0e3d", "#0a0a1a"]}
+      <Image
+        source={require("@/assets/images/welcome-bg.png")}
         style={StyleSheet.absoluteFill}
-        start={{ x: 0.2, y: 0 }}
-        end={{ x: 0.8, y: 1 }}
+        contentFit="cover"
+        contentPosition="center"
       />
 
-      <View style={[styles.content, { paddingTop: topPad + 40, paddingBottom: bottomPad + 24 }]}>
-        <View style={styles.logoSection}>
-          <View style={styles.logoGlow}>
-            <LinearGradient
-              colors={["#6D4AFF", "#00D4A4"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.logoGradient}
-            >
-              <Text style={styles.logoLetter}>G</Text>
-            </LinearGradient>
+      <LinearGradient
+        colors={["rgba(15,23,42,0.55)", "rgba(15,23,42,0.82)", "rgba(10,10,26,0.96)"]}
+        locations={[0, 0.45, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+
+      <View style={[styles.content, { paddingTop: topPad + 48, paddingBottom: bottomPad + 20 }]}>
+        <View style={styles.hero}>
+          <View style={styles.logoRing}>
+            <Image
+              source={require("@/assets/images/logo.png")}
+              style={styles.logoImage}
+              contentFit="cover"
+            />
           </View>
           <Text style={styles.appName}>Gbairai</Text>
           <Text style={styles.tagline}>Connectez-vous. Communiquez.{"\n"}Créez.</Text>
         </View>
 
-        <View style={styles.features}>
-          {["Messages instantanés", "Appels audio & vidéo", "Statuts & Stories"].map((f) => (
-            <View key={f} style={styles.featureRow}>
-              <View style={styles.featureDot} />
-              <Text style={styles.featureText}>{f}</Text>
+        <View style={styles.featuresCard}>
+          {FEATURES.map((feature, index) => (
+            <View
+              key={feature.label}
+              style={[
+                styles.featureRow,
+                index < FEATURES.length - 1 && styles.featureRowBorder,
+              ]}
+            >
+              <View style={styles.featureIconWrap}>
+                <Ionicons name={feature.icon} size={20} color="#8B6FFF" />
+              </View>
+              <Text style={styles.featureText}>{feature.label}</Text>
+              <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
             </View>
           ))}
         </View>
@@ -77,71 +97,86 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: 24,
     justifyContent: "space-between",
   },
-  logoSection: {
+  hero: {
     alignItems: "center",
-    gap: 16,
+    gap: 14,
   },
-  logoGlow: {
+  logoRing: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    padding: 3,
+    backgroundColor: "rgba(109,74,255,0.35)",
     shadowColor: "#6D4AFF",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.7,
-    shadowRadius: 40,
-    elevation: 20,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    elevation: 16,
   },
-  logoGradient: {
-    width: 110,
-    height: 110,
-    borderRadius: 32,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  logoLetter: {
-    fontSize: 60,
-    fontFamily: "Inter_700Bold",
-    color: "#fff",
+  logoImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 53,
   },
   appName: {
-    fontSize: 38,
+    fontSize: 36,
     fontFamily: "Inter_700Bold",
     color: "#fff",
-    letterSpacing: -0.5,
+    letterSpacing: -0.8,
   },
   tagline: {
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.55)",
+    color: "rgba(255,255,255,0.72)",
     textAlign: "center",
-    lineHeight: 26,
+    lineHeight: 24,
   },
-  features: {
-    gap: 14,
-    paddingVertical: 8,
+  featuresCard: {
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.1)",
   },
   featureRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
   },
-  featureDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#00D4A4",
+  featureRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  featureIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(109,74,255,0.18)",
   },
   featureText: {
+    flex: 1,
     fontSize: 16,
-    fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.75)",
+    fontFamily: "Inter_500Medium",
+    color: "rgba(255,255,255,0.9)",
   },
   actions: {
-    gap: 16,
+    gap: 14,
   },
   primaryBtn: {
     borderRadius: 16,
     overflow: "hidden",
+    shadowColor: "#6D4AFF",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 8,
   },
   primaryBtnGrad: {
     paddingVertical: 17,
@@ -155,9 +190,10 @@ const styles = StyleSheet.create({
   },
   disclaimer: {
     fontSize: 12,
-    color: "rgba(255,255,255,0.35)",
+    color: "rgba(255,255,255,0.38)",
     textAlign: "center",
     lineHeight: 18,
+    paddingHorizontal: 8,
   },
   link: {
     color: "#9B7FFF",

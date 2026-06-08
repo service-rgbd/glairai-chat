@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useMemo } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useMemo } from "react";
 import { Platform, SectionList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -16,11 +16,17 @@ export default function CallsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
-  const { calls, users, startOutgoingCall } = useChats();
+  const { calls, users, startOutgoingCall, markCallsAsSeen } = useChats();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
   const displayedCalls = isAuthenticated ? calls : MOCK_CALLS;
   const sections = useMemo(() => buildCallHistorySections(displayedCalls), [displayedCalls]);
+
+  useFocusEffect(
+    useCallback(() => {
+      markCallsAsSeen();
+    }, [markCallsAsSeen]),
+  );
 
   const handleCallPress = (call: (typeof displayedCalls)[number]) => {
     if (!call.conversationId) return;

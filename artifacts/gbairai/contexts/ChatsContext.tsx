@@ -52,6 +52,7 @@ import { UserCacheKeys, migrateLegacyUserCache } from "@/lib/offline-cache";
 import { setIncomingCall, clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
 import { fetchPendingIncomingCall } from "@/lib/calls";
 import { emitCallSignal } from "@/lib/call-signaling";
+import { countUnreadMissedCalls } from "@/lib/call-badge";
 import { logConversationCall } from "@/lib/call-log";
 import { isNativeLocalDbEnabled } from "@/lib/local-cache-enabled";
 import { prefetchConversationListMedia } from "@/lib/media-prefetch";
@@ -61,7 +62,6 @@ import {
   hydrateChatCacheFromLocalDb,
   persistConversationsToLocalDb,
   persistMessagesToLocalDb,
-  removeMessageFromLocalDb,
 } from "@/lib/chat-local-sync";
 import {
   createMediaUploadTarget,
@@ -75,6 +75,11 @@ import {
   uploadStoryMediaWithThumbnail,
 } from "@/lib/media";
 import { encodeEmoji3dMessagePayload } from "@/lib/emoji-messages";
+import {
+  encodeDeletedMessageContent,
+  encodeEditedTextMessageContent,
+  getMessageDisplayContent,
+} from "@/lib/message-meta";
 import { runWithUploadStatus } from "@/lib/upload-status";
 
 import type {
@@ -188,6 +193,7 @@ export function useChats(): ChatsContextType {
 }
 
 type ConversationsPage = { conversations: ConversationSummary[] };
+type ExtendedConversationSummary = ConversationSummary & { isArchived?: boolean };
 type MessagesPage = { messages: ConversationMessage[]; nextCursor: string | null };
 type RealtimeSocketEvent = {
   conversationId?: string;
@@ -302,7 +308,12 @@ function patchParticipantPresence(
 }
 
 function toReadableMessageContent(message: Pick<ConversationMessage, "content">) {
-  return message.content;
+  return getMessageDisplayContent(message.content).displayContent;
+}
+
+function toGMessageMeta(message: Pick<ConversationMessage, "content">) {
+  const { isDeleted, editedAt } = getMessageDisplayContent(message.content);
+  return { isDeleted, editedAt };
 }
 
 function upsertConversationSummary(
@@ -473,14 +484,17 @@ function toGMessage(
   currentUserId: string,
   toMessageStatus: (message: ConversationMessage, currentUserId: string) => MessageStatus,
 ): GMessage {
+  const meta = toGMessageMeta(message);
   return {
     id: message.id,
     chatId: message.conversationId,
     senderId: message.senderId,
     content: toReadableMessageContent(message),
-    type: message.type,
+    type: meta.isDeleted ? "text" : message.type,
     status: toMessageStatus(message, currentUserId),
     timestamp: message.createdAt,
+    editedAt: meta.editedAt,
+    isDeleted: meta.isDeleted,
   };
 }
 
@@ -499,6 +513,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const [composeContactsSnapshot, setComposeContactsSnapshot] = useState<ComposeContactOption[]>([]);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [calls, setCalls] = useState<GCall[]>([]);
+  const [callsLastSeenAt, setCallsLastSeenAt] = useState<string | null>(null);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const [localCacheHydrated, setLocalCacheHydrated] = useState(false);
   const [localStorageReady, setLocalStorageReady] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -526,12 +542,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       try {
         await migrateLegacyUserCache(userId);
 
-        const [rawOutbox, rawComposeContacts, rawCalls, rawLoadedConversations] =
+        const [rawOutbox, rawComposeContacts, rawCalls, rawLoadedConversations, rawCallsLastSeenAt] =
           await Promise.all([
             safeGetItem(UserCacheKeys.outbox(userId)),
             safeGetItem(UserCacheKeys.composeContacts(userId)),
             safeGetItem(UserCacheKeys.calls(userId)),
             safeGetItem(UserCacheKeys.loadedConversations(userId)),
+            safeGetItem(UserCacheKeys.callsLastSeenAt(userId)),
           ]);
 
         if (cancelled) return;
@@ -560,6 +577,11 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           if (Array.isArray(parsed) && parsed.length > 0) {
             setLoadedConversationIds(parsed);
           }
+        }
+        if (rawCallsLastSeenAt) {
+          setCallsLastSeenAt(rawCallsLastSeenAt);
+        } else {
+          setCallsLastSeenAt(new Date().toISOString());
         }
       } catch {
         // ignore
@@ -595,6 +617,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
     void safeSetItem(UserCacheKeys.calls(currentUser.id), JSON.stringify(calls));
   }, [calls, currentUser?.id, localStorageReady, isAuthenticated]);
+
+  useEffect(() => {
+    if (!localStorageReady || !isAuthenticated || !currentUser?.id || !callsLastSeenAt) {
+      return;
+    }
+    void safeSetItem(UserCacheKeys.callsLastSeenAt(currentUser.id), callsLastSeenAt);
+  }, [callsLastSeenAt, currentUser?.id, localStorageReady, isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
@@ -636,6 +665,24 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     refetchOnMount: false,
   });
 
+  const blockedUsersQuery = useQuery({
+    queryKey: ["blocked-users"],
+    queryFn: () => customFetch<{ userIds: string[] }>("/api/blocked-users"),
+    enabled: isAuthenticated && queryHydrated,
+    staleTime: CONVERSATIONS_STALE_MS,
+    refetchOnMount: false,
+  });
+
+  useEffect(() => {
+    setBlockedUserIds(blockedUsersQuery.data?.userIds ?? []);
+  }, [blockedUsersQuery.data?.userIds]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setBlockedUserIds([]);
+    }
+  }, [isAuthenticated]);
+
   useEffect(() => {
     const previousToken = prevAuthTokenRef.current;
     prevAuthTokenRef.current = authToken;
@@ -646,6 +693,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
     void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     void queryClient.invalidateQueries({ queryKey: ["stories"] });
+    void queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
   }, [authToken, queryClient]);
 
   const knownConversationIds = useMemo(() => {
@@ -882,12 +930,16 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const tombstoneContent = encodeDeletedMessageContent();
       queryClient.setQueryData<MessagesPage>(["messages", event.conversationId], (current) => ({
-        messages: removeConversationMessage(current?.messages ?? [], event.messageId!),
+        messages: (current?.messages ?? []).map((message) =>
+          message.id === event.messageId
+            ? { ...message, content: tombstoneContent, type: "text" }
+            : message,
+        ),
         nextCursor: current?.nextCursor ?? null,
       }));
       setOutbox((prev) => prev.filter((item) => item.localId !== event.messageId));
-      void removeMessageFromLocalDb(event.messageId);
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     });
 
@@ -1049,10 +1101,36 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         )
           .catch(() => undefined)
           .finally(refreshConversation);
-        return;
+      } else {
+        refreshConversation();
       }
 
-      refreshConversation();
+      if (
+        (type === "missed" || type === "cancelled") &&
+        event.callerUserId &&
+        event.callerUserId !== currentUser?.id &&
+        event.conversationId &&
+        event.callId
+      ) {
+        const callLogId = `calllog_${event.callId}`;
+        setCalls((prev) => {
+          if (prev.some((call) => call.id === callLogId)) return prev;
+          return [
+            {
+              id: callLogId,
+              userId: event.callerUserId!,
+              conversationId: event.conversationId,
+              type: event.callType ?? "audio",
+              direction: "incoming" as const,
+              missed: true,
+              failed: false,
+              duration: null,
+              timestamp: new Date().toISOString(),
+            },
+            ...prev,
+          ].slice(0, 200);
+        });
+      }
     };
 
     socket.on("call.cancelled", (event?: RealtimeSocketEvent) => {
@@ -1325,19 +1403,23 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const chats = useMemo<GChat[]>(
     () => {
       if (isAuthenticated) {
-        return conversationSummaries.map((conversation) => ({
-          id: conversation.id,
-          type: conversation.type,
-          participantIds: conversation.participants.map((participant) => participant.userId),
-          name: conversation.title ?? undefined,
-          avatarUrl: conversation.avatarUrl,
-          createdBy: conversation.createdBy,
-          unreadCount: conversation.unreadCount,
-          lastMessage:
-            conversation.lastMessage && currentUser
-              ? toGMessage(conversation.lastMessage, currentUser.id, toMessageStatus)
-              : undefined,
-        }));
+        return conversationSummaries.map((conversation) => {
+          const extended = conversation as ExtendedConversationSummary;
+          return {
+            id: conversation.id,
+            type: conversation.type,
+            participantIds: conversation.participants.map((participant) => participant.userId),
+            name: conversation.title ?? undefined,
+            avatarUrl: conversation.avatarUrl,
+            createdBy: conversation.createdBy,
+            unreadCount: conversation.unreadCount,
+            isArchived: Boolean(extended.isArchived),
+            lastMessage:
+              conversation.lastMessage && currentUser
+                ? toGMessage(conversation.lastMessage, currentUser.id, toMessageStatus)
+                : undefined,
+          };
+        });
       }
 
       return INITIAL_CHATS;
@@ -1548,14 +1630,31 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
   const deleteMessage = async (chatId: string, messageId: string) => {
     const previousMessages = queryClient.getQueryData<MessagesPage>(["messages", chatId]);
+    const tombstoneContent = encodeDeletedMessageContent();
     queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
-      messages: removeConversationMessage(current?.messages ?? [], messageId),
+      messages: (current?.messages ?? []).map((message) =>
+        message.id === messageId
+          ? { ...message, content: tombstoneContent, type: "text" }
+          : message,
+      ),
       nextCursor: current?.nextCursor ?? null,
     }));
 
     try {
-      await customFetch(`/api/messages/${messageId}`, { method: "DELETE" });
-      await removeMessageFromLocalDb(messageId);
+      const updatedMessage = await customFetch<ConversationMessage>(`/api/messages/${messageId}`, {
+        method: "DELETE",
+      });
+      queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
+        messages: upsertConversationMessage(current?.messages ?? [], updatedMessage),
+        nextCursor: current?.nextCursor ?? null,
+      }));
+      queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+        conversations: updateConversationSummaryWithEditedMessage(
+          current?.conversations ?? [],
+          updatedMessage,
+        ),
+      }));
+      await persistMessagesToLocalDb(chatId, [updatedMessage]);
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
     } catch (error) {
       if (previousMessages) {
@@ -1568,9 +1667,10 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const editMessage = async (chatId: string, messageId: string, content: string) => {
     const previousMessages = queryClient.getQueryData<MessagesPage>(["messages", chatId]);
     const trimmed = content.trim();
+    const editedContent = encodeEditedTextMessageContent(trimmed, new Date().toISOString());
     queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
       messages: (current?.messages ?? []).map((message) =>
-        message.id === messageId ? { ...message, content: trimmed } : message,
+        message.id === messageId ? { ...message, content: editedContent } : message,
       ),
       nextCursor: current?.nextCursor ?? null,
     }));
@@ -1591,6 +1691,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           updatedMessage,
         ),
       }));
+      await persistMessagesToLocalDb(chatId, [updatedMessage]);
     } catch (error) {
       if (previousMessages) {
         queryClient.setQueryData(["messages", chatId], previousMessages);
@@ -2180,10 +2281,10 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     chat.type === "group" && chat.createdBy === userId;
 
   const recordCall = (
-    input: Omit<GCall, "id" | "timestamp"> & { timestamp?: string },
+    input: Omit<GCall, "id" | "timestamp"> & { id?: string; timestamp?: string },
   ) => {
     const entry: GCall = {
-      id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: input.id ?? `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: input.timestamp ?? new Date().toISOString(),
       userId: input.userId,
       conversationId: input.conversationId,
@@ -2193,9 +2294,21 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       failed: input.failed,
       duration: input.duration,
     };
-    setCalls((prev) => [entry, ...prev].slice(0, 200));
+    setCalls((prev) => {
+      if (prev.some((call) => call.id === entry.id)) return prev;
+      return [entry, ...prev].slice(0, 200);
+    });
     return entry.id;
   };
+
+  const markCallsAsSeen = useCallback(() => {
+    setCallsLastSeenAt(new Date().toISOString());
+  }, []);
+
+  const missedCallsUnreadCount = useMemo(
+    () => countUnreadMissedCalls(calls, callsLastSeenAt),
+    [calls, callsLastSeenAt],
+  );
 
   const updateCall = (
     callId: string,
@@ -2226,8 +2339,54 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       setStories([]);
       return;
     }
-    setStories(storiesQuery.data?.stories ?? []);
-  }, [isAuthenticated, storiesQuery.data?.stories]);
+    const nextStories = (storiesQuery.data?.stories ?? []).filter(
+      (story) => !blockedUserIds.includes(story.userId),
+    );
+    setStories(nextStories);
+  }, [blockedUserIds, isAuthenticated, storiesQuery.data?.stories]);
+
+  const isUserBlocked = (userId: string) => blockedUserIds.includes(userId);
+
+  const blockUser = async (userId: string) => {
+    await customFetch(`/api/users/${userId}/block`, { method: "POST" });
+    setBlockedUserIds((prev) => (prev.includes(userId) ? prev : [...prev, userId]));
+    await queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
+    await queryClient.invalidateQueries({ queryKey: ["stories"] });
+
+    const directChat = chats.find(
+      (chat) =>
+        chat.type === "direct" &&
+        chat.participantIds.includes(userId) &&
+        chat.participantIds.includes(currentUserId),
+    );
+    if (directChat) {
+      await archiveConversation(directChat.id, true);
+    }
+  };
+
+  const unblockUser = async (userId: string) => {
+    await customFetch(`/api/users/${userId}/block`, { method: "DELETE" });
+    setBlockedUserIds((prev) => prev.filter((id) => id !== userId));
+    await queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
+    await queryClient.invalidateQueries({ queryKey: ["stories"] });
+  };
+
+  const archiveConversation = async (chatId: string, archived = true) => {
+    const updatedConversation = await customFetch<ExtendedConversationSummary>(
+      `/api/conversations/${chatId}/archive`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ archived }),
+      },
+    );
+    queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+      conversations: upsertConversationSummary(
+        current?.conversations ?? [],
+        updatedConversation,
+      ),
+    }));
+  };
 
   const hasConversationData = conversationsQuery.data !== undefined;
   const isLoadingChats =
@@ -2243,6 +2402,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         messages,
         users,
         calls,
+        missedCallsUnreadCount,
+        markCallsAsSeen,
+        blockedUserIds,
+        blockUser,
+        unblockUser,
+        isUserBlocked,
+        archiveConversation,
         stories,
         isLoadingChats,
         socketConnected,

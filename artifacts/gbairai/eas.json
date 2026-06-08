@@ -1,0 +1,65 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+      },
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium",
+        "credentialsSource": "local"
+      },
+      "android": {
+        "buildType": "apk",
+        "credentialsSource": "remote"
+      }
+    },
+    "development-simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+      },
+      "ios": {
+        "simulator": true,
+        "resourceClass": "m-medium",
+        "credentialsSource": "remote"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "bundleIdentifier": "com.gbairai.chat"
+      }
+    }
+  }
+}

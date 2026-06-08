@@ -132,6 +132,7 @@ export const conversationMembersTable = pgTable(
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
     lastReadMessageId: text("last_read_message_id"),
     unreadCount: integer("unread_count").notNull().default(0),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.conversationId, table.userId] }),
@@ -194,6 +195,24 @@ export const deviceTokensTable = pgTable("device_tokens", {
   userIdx: index("device_tokens_user_idx").on(table.userId),
 }));
 
+export const userBlocksTable = pgTable(
+  "user_blocks",
+  {
+    blockerId: text("blocker_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    blockedId: text("blocked_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.blockerId, table.blockedId] }),
+    blockerIdx: index("user_blocks_blocker_idx").on(table.blockerId),
+    blockedIdx: index("user_blocks_blocked_idx").on(table.blockedId),
+  }),
+);
+
 export const contactEdgesTable = pgTable(
   "contact_edges",
   {
@@ -205,6 +224,8 @@ export const contactEdgesTable = pgTable(
     matchedUserId: text("matched_user_id").references(() => usersTable.id, {
       onDelete: "set null",
     }),
+    /** phonebook = carnet synchronisé ; story_reply = ajouté via réponse à un statut */
+    source: text("source").notNull().default("phonebook"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -333,6 +354,7 @@ export type NewUserRecord = typeof usersTable.$inferInsert;
 export type ConversationRecord = typeof conversationsTable.$inferSelect;
 export type GroupInviteRecord = typeof groupInvitesTable.$inferSelect;
 export type ConversationMemberRecord = typeof conversationMembersTable.$inferSelect;
+export type UserBlockRecord = typeof userBlocksTable.$inferSelect;
 export type MessageRecord = typeof messagesTable.$inferSelect;
 export type MessageReceiptRecord = typeof messageReceiptsTable.$inferSelect;
 export type StoryRecord = typeof storiesTable.$inferSelect;
