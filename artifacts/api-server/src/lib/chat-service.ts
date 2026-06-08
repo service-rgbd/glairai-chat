@@ -18,7 +18,7 @@ import {
   storyViewsTable,
   usersTable,
 } from "@workspace/db";
-import { and, desc, eq, gte, inArray, lte, ne, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, like, lte, ne, or } from "drizzle-orm";
 import { getCountries, getCountryCallingCode, parsePhoneNumberFromString } from "libphonenumber-js";
 
 import { logger } from "./logger";
@@ -301,6 +301,24 @@ export interface ChatService {
   publishCallDeclined(token: string, session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] }): Awaitable<void>;
   publishCallEnded(token: string, session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] }): Awaitable<void>;
   publishCallMissed(callId: string): Awaitable<void>;
+  recordCallLogMessage(
+    token: string,
+    input: {
+      callId: string;
+      conversationId: string;
+      callerUserId: string;
+      callType: "audio" | "video";
+      outcome: CallMessageOutcome;
+      durationSeconds?: number | null;
+    },
+  ): Awaitable<{ created: boolean }>;
+  notifyCallSignal(input: {
+    conversationId: string;
+    callId: string;
+    callerUserId: string;
+    callType: "audio" | "video";
+    signal: "cancelled" | "declined" | "ended" | "missed";
+  }): Awaitable<void>;
 }
 
 interface UserRecord {
@@ -3053,7 +3071,14 @@ class DatabaseChatService implements ChatService {
     session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
   ) {
     await this.requireUserByToken(token);
-    await this.createCallLogMessage(session.id, "cancelled");
+    const liveSession = getCallSession(session.id);
+    await this.persistCallLogMessage({
+      callId: session.id,
+      conversationId: session.conversationId,
+      callerUserId: session.callerUserId,
+      callType: liveSession?.type ?? "audio",
+      outcome: "cancelled",
+    });
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.cancelled",
@@ -3061,6 +3086,7 @@ class DatabaseChatService implements ChatService {
       conversationId: session.conversationId,
       callId: session.id,
       callerUserId: session.callerUserId,
+      callType: liveSession?.type ?? "audio",
     });
   }
 
@@ -3069,7 +3095,14 @@ class DatabaseChatService implements ChatService {
     session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
   ) {
     await this.requireUserByToken(token);
-    await this.createCallLogMessage(session.id, "declined");
+    const liveSession = getCallSession(session.id);
+    await this.persistCallLogMessage({
+      callId: session.id,
+      conversationId: session.conversationId,
+      callerUserId: session.callerUserId,
+      callType: liveSession?.type ?? "audio",
+      outcome: "declined",
+    });
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.declined",
@@ -3077,6 +3110,7 @@ class DatabaseChatService implements ChatService {
       conversationId: session.conversationId,
       callId: session.id,
       callerUserId: session.callerUserId,
+      callType: liveSession?.type ?? "audio",
     });
   }
 
@@ -3087,19 +3121,26 @@ class DatabaseChatService implements ChatService {
     await this.requireUserByToken(token);
     const liveSession = getCallSession(session.id);
     const wasAnswered = liveSession?.answeredAt != null;
-    await this.createCallLogMessage(
-      session.id,
-      wasAnswered ? "completed" : "cancelled",
+    const durationSeconds =
       wasAnswered && liveSession?.answeredAt
         ? Math.max(0, Math.round((Date.now() - liveSession.answeredAt) / 1000))
-        : null,
-    );
+        : null;
+    await this.persistCallLogMessage({
+      callId: session.id,
+      conversationId: session.conversationId,
+      callerUserId: session.callerUserId,
+      callType: liveSession?.type ?? "audio",
+      outcome: wasAnswered ? "completed" : "missed",
+      durationSeconds,
+    });
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.ended",
       participantIds,
       conversationId: session.conversationId,
       callId: session.id,
+      callerUserId: session.callerUserId,
+      callType: liveSession?.type ?? "audio",
     });
   }
 
@@ -3107,7 +3148,13 @@ class DatabaseChatService implements ChatService {
     const session = getCallSession(callId);
     if (!session || session.status !== "ringing") return;
     finalizeCall(callId, "missed");
-    await this.createCallLogMessage(callId, "missed");
+    await this.persistCallLogMessage({
+      callId: session.id,
+      conversationId: session.conversationId,
+      callerUserId: session.callerUserId,
+      callType: session.type,
+      outcome: "missed",
+    });
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.missed",
@@ -3115,36 +3162,91 @@ class DatabaseChatService implements ChatService {
       conversationId: session.conversationId,
       callId: session.id,
       callerUserId: session.callerUserId,
+      callType: session.type,
     });
   }
 
-  private async createCallLogMessage(
-    callId: string,
-    outcome: CallMessageOutcome,
-    durationSeconds: number | null = null,
+  async recordCallLogMessage(
+    token: string,
+    input: {
+      callId: string;
+      conversationId: string;
+      callerUserId: string;
+      callType: "audio" | "video";
+      outcome: CallMessageOutcome;
+      durationSeconds?: number | null;
+    },
   ) {
-    const session = getCallSession(callId);
-    if (!session || session.callLogCreated) {
-      return;
+    const user = await this.requireUserByToken(token);
+    await this.requireConversationMembership(input.conversationId, user.id);
+    const participantIds = await this.getConversationParticipantIds(input.conversationId);
+    if (!participantIds.includes(input.callerUserId)) {
+      throw new Error("Appel non autorisé");
     }
-    if (!markCallLogCreated(callId)) {
-      return;
+    const created = await this.persistCallLogMessage(input);
+    return { created };
+  }
+
+  async notifyCallSignal(input: {
+    conversationId: string;
+    callId: string;
+    callerUserId: string;
+    callType: "audio" | "video";
+    signal: "cancelled" | "declined" | "ended" | "missed";
+  }) {
+    const participantIds = await this.getConversationParticipantIds(input.conversationId);
+    this.publish({
+      type: `call.${input.signal}`,
+      participantIds,
+      conversationId: input.conversationId,
+      callId: input.callId,
+      callerUserId: input.callerUserId,
+      callType: input.callType,
+    });
+  }
+
+  private async hasCallLogMessage(callId: string, conversationId: string) {
+    const rows = await db!
+      .select({ id: messagesTable.id })
+      .from(messagesTable)
+      .where(
+        and(
+          eq(messagesTable.conversationId, conversationId),
+          like(messagesTable.content, `%"callId":"${callId}"%`),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  private async persistCallLogMessage(input: {
+    callId: string;
+    conversationId: string;
+    callerUserId: string;
+    callType: "audio" | "video";
+    outcome: CallMessageOutcome;
+    durationSeconds?: number | null;
+  }) {
+    if (await this.hasCallLogMessage(input.callId, input.conversationId)) {
+      return false;
     }
+    markCallLogCreated(input.callId);
 
     const content = encodeCallMessagePayload({
       kind: "call",
-      callId: session.id,
-      callType: session.type,
-      outcome,
-      durationSeconds,
+      callId: input.callId,
+      callType: input.callType,
+      outcome: input.outcome,
+      durationSeconds: input.durationSeconds ?? null,
     });
 
     await this.sendConversationMessage(
       "",
-      session.conversationId,
+      input.conversationId,
       { content, type: "text" },
-      session.callerUserId,
+      input.callerUserId,
     );
+    return true;
   }
 
   async resolveUserIdByToken(token: string) {

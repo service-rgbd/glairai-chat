@@ -20,6 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import { signalConversationCall } from "@/lib/calls";
+import { logConversationCall } from "@/lib/call-log";
 import { subscribeCallSignal } from "@/lib/call-signaling";
 import {
   clearIncomingCallIfMatches,
@@ -102,9 +103,27 @@ export function IncomingCallOverlay() {
     void (async () => {
       if (authToken) {
         try {
-          await signalConversationCall(incoming.callId, "decline", authToken);
+          await signalConversationCall(incoming.callId, "decline", authToken, {
+            conversationId: incoming.conversationId,
+            callType: incoming.callType,
+            callerUserId: incoming.callerUserId,
+          });
         } catch {
           // Best effort: clear local overlay even if API unreachable.
+        }
+        try {
+          await logConversationCall(
+            {
+              callId: incoming.callId,
+              conversationId: incoming.conversationId,
+              callerUserId: incoming.callerUserId,
+              callType: incoming.callType,
+              outcome: "declined",
+            },
+            authToken,
+          );
+        } catch {
+          // Best effort.
         }
       }
       recordCall({

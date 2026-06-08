@@ -52,6 +52,7 @@ import { UserCacheKeys, migrateLegacyUserCache } from "@/lib/offline-cache";
 import { setIncomingCall, clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
 import { fetchPendingIncomingCall } from "@/lib/calls";
 import { emitCallSignal } from "@/lib/call-signaling";
+import { logConversationCall } from "@/lib/call-log";
 import { isNativeLocalDbEnabled } from "@/lib/local-cache-enabled";
 import { prefetchConversationListMedia } from "@/lib/media-prefetch";
 import { isRealtimeSocketEnabled } from "@/lib/runtime-env";
@@ -1022,8 +1023,38 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         callId: event.callId,
         conversationId: event.conversationId,
       });
-      void queryClient.invalidateQueries({ queryKey: ["messages", event.conversationId] });
-      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+
+      const outcome =
+        type === "missed"
+          ? ("missed" as const)
+          : type === "cancelled"
+            ? ("cancelled" as const)
+            : type === "declined"
+              ? ("declined" as const)
+              : ("completed" as const);
+
+      const refreshConversation = () => {
+        void queryClient.invalidateQueries({ queryKey: ["messages", event.conversationId] });
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      };
+
+      if (authToken && event.callerUserId) {
+        void logConversationCall(
+          {
+            callId: event.callId,
+            conversationId: event.conversationId,
+            callerUserId: event.callerUserId,
+            callType: event.callType ?? "audio",
+            outcome,
+          },
+          authToken,
+        )
+          .catch(() => undefined)
+          .finally(refreshConversation);
+        return;
+      }
+
+      refreshConversation();
     };
 
     socket.on("call.cancelled", (event?: RealtimeSocketEvent) => {

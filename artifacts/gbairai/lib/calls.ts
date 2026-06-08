@@ -5,6 +5,13 @@ import { getApiBaseUrl } from "./api-config";
 export type CallRole = "caller" | "callee";
 export type CallSignalAction = "cancel" | "decline" | "end";
 
+export type CallSignalMeta = {
+  conversationId: string;
+  callType: CreateCallTokenInputType;
+  callerUserId: string;
+  durationSeconds?: number | null;
+};
+
 export type PreparedCallSession = CallSession & {
   callId: string;
   role: CallRole;
@@ -73,8 +80,17 @@ export async function signalConversationCall(
   callId: string,
   action: CallSignalAction,
   authToken: string,
+  meta?: CallSignalMeta,
 ) {
-  return postCallApi<{ ok: true; status: string }>("/calls/signal", { callId, action }, authToken);
+  return postCallApi<{ ok: true; status: string }>(
+    "/calls/signal",
+    {
+      callId,
+      action,
+      ...(meta ?? {}),
+    },
+    authToken,
+  );
 }
 
 export async function fetchPendingIncomingCall(authToken: string) {

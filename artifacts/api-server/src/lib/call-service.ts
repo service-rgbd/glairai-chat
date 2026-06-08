@@ -150,12 +150,60 @@ export async function createCallSession(
 
 export async function signalCall(
   authToken: string,
-  input: { callId: string; action: "cancel" | "decline" | "end" },
+  input: {
+    callId: string;
+    action: "cancel" | "decline" | "end";
+    conversationId?: string;
+    callType?: CallType;
+    callerUserId?: string;
+    durationSeconds?: number | null;
+  },
 ) {
   const currentUser = await chatService.getCurrentUser(authToken);
   const session = getCallSession(input.callId);
+
   if (!session) {
-    throw new Error("Appel introuvable");
+    if (!input.conversationId || !input.callType || !input.callerUserId) {
+      throw new Error("Appel introuvable");
+    }
+
+    const outcome =
+      input.action === "cancel"
+        ? ("cancelled" as const)
+        : input.action === "decline"
+          ? ("declined" as const)
+          : ("completed" as const);
+
+    await chatService.recordCallLogMessage(authToken, {
+      callId: input.callId,
+      conversationId: input.conversationId,
+      callerUserId: input.callerUserId,
+      callType: input.callType,
+      outcome,
+      durationSeconds: input.durationSeconds ?? null,
+    });
+
+    await chatService.notifyCallSignal({
+      conversationId: input.conversationId,
+      callId: input.callId,
+      callerUserId: input.callerUserId,
+      callType: input.callType,
+      signal:
+        input.action === "cancel"
+          ? "cancelled"
+          : input.action === "decline"
+            ? "declined"
+            : "ended",
+    });
+
+    return {
+      ok: true as const,
+      status: (input.action === "cancel"
+        ? "cancelled"
+        : input.action === "decline"
+          ? "declined"
+          : "ended") as "cancelled" | "declined" | "ended",
+    };
   }
 
   const isCaller = currentUser.id === session.callerUserId;

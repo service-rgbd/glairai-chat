@@ -4,6 +4,7 @@ import {
 import { Router, type IRouter } from "express";
 
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
+import { chatService } from "../lib/chat-service";
 import { createCallSession, getIncomingCallForUser, signalCall, type CallRole } from "../lib/call-service";
 
 const router: IRouter = Router();
@@ -44,15 +45,70 @@ router.post("/calls/signal", requireAuth, async (req: AuthenticatedRequest, res)
   try {
     const callId = typeof req.body?.callId === "string" ? req.body.callId : "";
     const action = req.body?.action;
+    const conversationId =
+      typeof req.body?.conversationId === "string" ? req.body.conversationId : undefined;
+    const callType = req.body?.callType === "video" ? "video" : req.body?.callType === "audio" ? "audio" : undefined;
+    const callerUserId =
+      typeof req.body?.callerUserId === "string" ? req.body.callerUserId : undefined;
+    const durationSeconds =
+      typeof req.body?.durationSeconds === "number" ? req.body.durationSeconds : undefined;
     if (!callId || (action !== "cancel" && action !== "decline" && action !== "end")) {
       throw new Error("Requête d'appel invalide");
     }
-    const result = await signalCall(req.authToken!, { callId, action });
+    const result = await signalCall(req.authToken!, {
+      callId,
+      action,
+      conversationId,
+      callType,
+      callerUserId,
+      durationSeconds,
+    });
     res.json(result);
   } catch (error) {
     res.status(400).json({
       message:
         error instanceof Error ? error.message : "Impossible de mettre à jour l'appel",
+    });
+  }
+});
+
+router.post("/calls/log", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const callId = typeof req.body?.callId === "string" ? req.body.callId : "";
+    const conversationId =
+      typeof req.body?.conversationId === "string" ? req.body.conversationId : "";
+    const callerUserId =
+      typeof req.body?.callerUserId === "string" ? req.body.callerUserId : "";
+    const callType = req.body?.callType === "video" ? "video" : "audio";
+    const outcome = req.body?.outcome;
+    const durationSeconds =
+      typeof req.body?.durationSeconds === "number" ? req.body.durationSeconds : null;
+
+    if (
+      !callId ||
+      !conversationId ||
+      !callerUserId ||
+      (outcome !== "completed" &&
+        outcome !== "missed" &&
+        outcome !== "declined" &&
+        outcome !== "cancelled")
+    ) {
+      throw new Error("Requête de journal d'appel invalide");
+    }
+
+    const result = await chatService.recordCallLogMessage(req.authToken!, {
+      callId,
+      conversationId,
+      callerUserId,
+      callType,
+      outcome,
+      durationSeconds,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      message:
+        error instanceof Error ? error.message : "Impossible d'enregistrer l'appel",
     });
   }
 });
