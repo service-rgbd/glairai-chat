@@ -3,6 +3,7 @@ import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 import { chatService } from "./chat-service";
 import { CallBusyError, CallForbiddenError, CallNotFoundError } from "./call-errors";
 import { findRingingCallForCalleeFromDb, isUserBusyInDb } from "./call-session-persistence";
+import { logger } from "./logger";
 import {
   getLiveKitConfig,
   isLiveKitConfigured,
@@ -194,14 +195,21 @@ export async function createCallSession(
     callId: activeCall.id,
   });
 
-  await chatService.notifyIncomingCall(authToken, {
-    conversationId: livekit.conversationId,
-    type: input.type,
-    callerUserId: currentUser.id,
-    callerName: currentUser.name,
-    callerAvatarUrl: currentUser.avatarUrl,
-    callId: activeCall.id,
-  });
+  try {
+    await chatService.notifyIncomingCall(authToken, {
+      conversationId: livekit.conversationId,
+      type: input.type,
+      callerUserId: currentUser.id,
+      callerName: currentUser.name,
+      callerAvatarUrl: currentUser.avatarUrl,
+      callId: activeCall.id,
+    });
+  } catch (error) {
+    logger.warn(
+      { err: error, callId: activeCall.id },
+      "Notification d'appel entrant échouée — session LiveKit conservée",
+    );
+  }
 
   scheduleRingTimeout(activeCall.id, () => {
     void chatService.publishCallMissed(activeCall.id);

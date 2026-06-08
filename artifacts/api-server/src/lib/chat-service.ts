@@ -3076,6 +3076,12 @@ class DatabaseChatService implements ChatService {
       callType: input.type,
       callerUserId: input.callerUserId,
       callId: input.callId,
+    }).catch((error) => {
+      logger.warn(
+        { err: error },
+        "Push VoIP ignoré (clé APNS invalide ou absente) — l'appel continue via socket",
+      );
+      return 0;
     });
 
     if (voipSent > 0) {

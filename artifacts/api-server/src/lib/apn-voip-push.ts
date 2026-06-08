@@ -78,8 +78,15 @@ export async function sendVoipIncomingCallPushes(
     sound: "incoming.wav",
   };
 
-  const result = await activeProvider.send(notification, tokens);
-  return result.sent.length;
+  try {
+    const result = await activeProvider.send(notification, tokens);
+    return result.sent.length;
+  } catch {
+    shutdownVoipPushProvider();
+    throw new Error(
+      "Push VoIP APNS échoué — vérifiez APNS_VOIP_KEY (.p8), APNS_VOIP_KEY_ID et APNS_VOIP_TEAM_ID sur Render",
+    );
+  }
 }
 
 export function shutdownVoipPushProvider() {

@@ -3,6 +3,7 @@ import { HealthCheckResponse } from "@workspace/api-zod";
 
 import { shouldExposeOtpDemoCode } from "../lib/sms-service";
 import { isLiveKitConfigured, verifyLiveKitTokenGeneration } from "../lib/livekit-config";
+import { isVoipPushConfigured } from "../lib/apn-voip-push";
 
 const router: IRouter = Router();
 
@@ -16,6 +17,7 @@ router.get("/healthz", async (_req, res) => {
     otpDemoCodeEnabled: shouldExposeOtpDemoCode(),
     livekitConfigured,
     livekitTokenOk: livekitCheck?.ok ?? false,
+    apnsVoipConfigured: isVoipPushConfigured(),
     ...(livekitCheck && !livekitCheck.ok && livekitCheck.reason === "token_error"
       ? { livekitError: livekitCheck.message }
       : {}),
