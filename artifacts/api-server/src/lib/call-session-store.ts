@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { CallBusyError } from "./call-errors";
 import {
+  expireStaleCallSessionsInDb,
   loadActiveCallSessionsFromDb,
   loadCallSessionFromDb,
   persistCallSession,
@@ -25,6 +26,12 @@ export type ActiveCallSession = {
 
 const RING_TIMEOUT_MS = 15_000;
 const LIVE_SESSION_STATUSES = new Set<CallSessionStatus>(["ringing", "answered"]);
+const STALE_SESSION_MS = 20 * 60 * 1000;
+
+function isSessionStale(session: ActiveCallSession) {
+  const anchor = session.answeredAt ?? session.createdAt;
+  return Date.now() - anchor > STALE_SESSION_MS;
+}
 
 const sessions = new Map<string, ActiveCallSession>();
 const byConversation = new Map<string, string>();
@@ -42,10 +49,12 @@ export function hydrateCallSession(session: ActiveCallSession) {
 }
 
 export async function initializeCallSessionStore() {
+  await expireStaleCallSessionsInDb();
   const active = await loadActiveCallSessionsFromDb();
   for (const session of active) {
     hydrateCallSession(session);
   }
+  purgeStaleSessions();
   return active.length;
 }
 
@@ -62,13 +71,23 @@ export async function resolveCallSession(callId: string) {
 }
 
 export function isUserBusy(userId: string, ignoreCallId?: string) {
+  purgeStaleSessions();
   for (const session of sessions.values()) {
     if (ignoreCallId && session.id === ignoreCallId) continue;
     if (!LIVE_SESSION_STATUSES.has(session.status)) continue;
+    if (isSessionStale(session)) continue;
     if (session.callerUserId === userId) return true;
     if (session.calleeUserIds.includes(userId)) return true;
   }
   return false;
+}
+
+function purgeStaleSessions() {
+  for (const session of [...sessions.values()]) {
+    if (!LIVE_SESSION_STATUSES.has(session.status)) continue;
+    if (!isSessionStale(session)) continue;
+    finalizeCall(session.id, session.status === "answered" ? "ended" : "missed");
+  }
 }
 
 export function findRingingCallForCallee(userId: string) {

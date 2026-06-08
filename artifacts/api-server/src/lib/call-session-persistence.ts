@@ -4,6 +4,12 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { ActiveCallSession, CallSessionStatus } from "./call-session-store";
 
 const LIVE_STATUSES: CallSessionStatus[] = ["ringing", "answered"];
+const STALE_SESSION_MS = 20 * 60 * 1000;
+
+function isRowStale(row: typeof callSessionsTable.$inferSelect) {
+  const anchor = row.answeredAt?.getTime() ?? row.createdAt.getTime();
+  return Date.now() - anchor > STALE_SESSION_MS;
+}
 
 function rowToSession(row: typeof callSessionsTable.$inferSelect): ActiveCallSession {
   let calleeUserIds: string[] = [];
@@ -67,29 +73,37 @@ export async function deletePersistedCallSession(callId: string) {
   await db.delete(callSessionsTable).where(eq(callSessionsTable.id, callId));
 }
 
-export async function loadActiveCallSessionsFromDb() {
-  if (!db) return [] as ActiveCallSession[];
+export async function expireStaleCallSessionsInDb() {
+  if (!db) return;
 
   const rows = await db
     .select()
     .from(callSessionsTable)
     .where(inArray(callSessionsTable.status, LIVE_STATUSES));
 
-  const staleBefore = Date.now() - 20 * 60 * 1000;
-  const active: ActiveCallSession[] = [];
-
   for (const row of rows) {
-    if (row.createdAt.getTime() < staleBefore) {
-      await db
-        .update(callSessionsTable)
-        .set({ status: "missed", updatedAt: new Date() })
-        .where(eq(callSessionsTable.id, row.id));
-      continue;
-    }
-    active.push(rowToSession(row));
+    if (!isRowStale(row)) continue;
+    await db
+      .update(callSessionsTable)
+      .set({
+        status: row.status === "answered" ? "ended" : "missed",
+        updatedAt: new Date(),
+      })
+      .where(eq(callSessionsTable.id, row.id));
   }
+}
 
-  return active;
+export async function loadActiveCallSessionsFromDb() {
+  if (!db) return [] as ActiveCallSession[];
+
+  await expireStaleCallSessionsInDb();
+
+  const rows = await db
+    .select()
+    .from(callSessionsTable)
+    .where(inArray(callSessionsTable.status, LIVE_STATUSES));
+
+  return rows.map(rowToSession);
 }
 
 export async function loadCallSessionFromDb(callId: string) {
@@ -132,6 +146,7 @@ export async function isUserBusyInDb(userId: string, ignoreCallId?: string) {
 
   for (const row of rows) {
     if (ignoreCallId && row.id === ignoreCallId) continue;
+    if (isRowStale(row)) continue;
     const session = rowToSession(row);
     if (session.callerUserId === userId) return true;
     if (session.calleeUserIds.includes(userId)) return true;
