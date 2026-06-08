@@ -10,7 +10,9 @@
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
         "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
-        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true",
+        "EXPO_PUBLIC_VOIP_PUSH_ENABLED": "true",
+        "EXPO_PUBLIC_VOIP_JS_REGISTER": "false"
       },
       "ios": {
         "simulator": false,
@@ -28,7 +30,9 @@
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
         "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
-        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true",
+        "EXPO_PUBLIC_VOIP_PUSH_ENABLED": "true",
+        "EXPO_PUBLIC_VOIP_JS_REGISTER": "false"
       },
       "ios": {
         "simulator": true,
@@ -41,7 +45,9 @@
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
         "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
-        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true",
+        "EXPO_PUBLIC_VOIP_PUSH_ENABLED": "true",
+        "EXPO_PUBLIC_VOIP_JS_REGISTER": "false"
       },
       "ios": {
         "resourceClass": "m-medium"
@@ -52,7 +58,9 @@
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
         "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
-        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true",
+        "EXPO_PUBLIC_VOIP_PUSH_ENABLED": "true",
+        "EXPO_PUBLIC_VOIP_JS_REGISTER": "false"
       },
       "ios": {
         "resourceClass": "m-medium"

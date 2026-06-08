@@ -5,15 +5,15 @@ import { isExpoGo } from "@/lib/runtime-env";
 
 type CallKeepModule = typeof import("react-native-callkeep").default;
 
-let callKeep: CallKeepModule | null = null;
-let initialized = false;
-let listenersAttached = false;
-
 type NativeCallHandlers = {
   onAnswer: (callId: string) => void;
   onEnd: (callId: string) => void;
 };
 
+let callKeep: CallKeepModule | null = null;
+let initialized = false;
+let initializing: Promise<boolean> | null = null;
+let listenersAttached = false;
 let handlers: NativeCallHandlers | null = null;
 const displayedCalls = new Set<string>();
 
@@ -46,52 +46,78 @@ function attachListeners(module: CallKeepModule) {
   });
 }
 
-export async function setupNativeCallUi(nextHandlers: NativeCallHandlers) {
+export function registerNativeCallHandlers(nextHandlers: NativeCallHandlers) {
   handlers = nextHandlers;
-  if (!isNativeCallUiEnabled()) return false;
+}
+
+async function setupCallKeepModule() {
+  if (initialized) return true;
+  if (initializing) return initializing;
+
+  if (!handlers) return false;
 
   const module = loadCallKeep();
   if (!module) return false;
 
-  try {
-    await module.setup({
-      ios: {
-        appName: "Gbairai",
-        supportsVideo: true,
-        includesCallsInRecents: true,
-      },
-      android: {
-        alertTitle: "Autorisations d'appel",
-        alertDescription:
-          "Gbairai a besoin d'accéder au téléphone pour afficher les appels entrants sur l'écran de verrouillage.",
-        cancelButton: "Annuler",
-        okButton: "Autoriser",
-        additionalPermissions: [],
-        foregroundService: {
-          channelId: "com.gbairai.chat.calls",
-          channelName: "Appels Gbairai",
-          notificationTitle: "Appel en cours",
-          notificationIcon: "ic_launcher",
+  initializing = (async () => {
+    try {
+      await module.setup({
+        ios: {
+          appName: "Gbairai",
+          supportsVideo: true,
+          includesCallsInRecents: true,
         },
-      },
-    });
-    await module.setAvailable(true);
-    attachListeners(module);
-    initialized = true;
-    return true;
-  } catch {
-    return false;
-  }
+        android: {
+          alertTitle: "Autorisations d'appel",
+          alertDescription:
+            "Gbairai a besoin d'accéder au téléphone pour afficher les appels entrants sur l'écran de verrouillage.",
+          cancelButton: "Annuler",
+          okButton: "Autoriser",
+          additionalPermissions: [],
+          foregroundService: {
+            channelId: "com.gbairai.chat.calls",
+            channelName: "Appels Gbairai",
+            notificationTitle: "Appel en cours",
+            notificationIcon: "ic_launcher",
+          },
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await module.setAvailable(true);
+      attachListeners(module);
+      initialized = true;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      initializing = null;
+    }
+  })();
+
+  return initializing;
+}
+
+/** Initialise CallKit pour les handlers répondre / raccrocher (VoIP ou in-app). */
+export async function setupNativeCallUi(nextHandlers: NativeCallHandlers) {
+  registerNativeCallHandlers(nextHandlers);
+  return setupCallKeepModule();
+}
+
+export async function ensureNativeCallUiReady() {
+  if (!handlers) return false;
+  return setupCallKeepModule();
 }
 
 export function isNativeCallUiAvailable() {
   return initialized && callKeep != null;
 }
 
-export function displayNativeIncomingCall(call: IncomingCallPayload) {
+export async function displayNativeIncomingCall(call: IncomingCallPayload) {
+  const ready = await ensureNativeCallUiReady();
+  if (!ready) return false;
+
   const module = loadCallKeep();
-  if (!module || !initialized) return false;
-  if (displayedCalls.has(call.callId)) return true;
+  if (!module || displayedCalls.has(call.callId)) return displayedCalls.has(call.callId);
 
   try {
     module.displayIncomingCall(

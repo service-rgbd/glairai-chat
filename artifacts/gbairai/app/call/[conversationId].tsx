@@ -238,6 +238,7 @@ export default function CallScreen() {
         setSoundPhase("ringing");
       } catch (cause) {
         if (cancelled) return;
+        setActiveCall(null);
         const message =
           cause instanceof CallRequestError
             ? cause.message

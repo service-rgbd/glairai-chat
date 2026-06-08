@@ -3,7 +3,16 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Alert,
+  FlatList,
+  Keyboard,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeKeyboardAvoidingView as KeyboardAvoidingView } from "@/components/SafeKeyboardAvoidingView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -110,8 +119,15 @@ export default function ChatScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const INPUT_DOCK_HEIGHT = 76;
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const inputBottomInset = keyboardOpen ? 0 : bottomPad;
+  const listBottomPadding = keyboardOpen
+    ? keyboardHeight + INPUT_DOCK_HEIGHT + 10
+    : bottomPad + INPUT_DOCK_HEIGHT;
   const topFadeHeight = topPad + HEADER_BODY_HEIGHT + 28;
-  const bottomFadeHeight = bottomPad + 76;
+  const bottomFadeHeight = bottomPad + INPUT_DOCK_HEIGHT;
   const edgeFadeColors = useMemo(
     () => ({
       top: [
@@ -136,6 +152,31 @@ export default function ChatScreen() {
       leaveConversationRealtime(id);
     };
   }, [id]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardOpen(true);
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardOpen(false);
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!keyboardOpen || chatMessages.length === 0) return;
+    const timer = setTimeout(() => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [keyboardOpen, keyboardHeight, chatMessages.length]);
 
   useEffect(() => {
     if (!id) return;
@@ -429,7 +470,7 @@ export default function ChatScreen() {
           style={styles.messageListFullBleed}
           contentContainerStyle={[
             styles.messageList,
-            { paddingBottom: topFadeHeight, paddingTop: bottomFadeHeight },
+            { paddingBottom: topFadeHeight, paddingTop: listBottomPadding },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="interactive"
@@ -587,7 +628,7 @@ export default function ChatScreen() {
               if (!id) return;
               setTypingState(id, isTyping);
             }}
-            bottomInset={bottomPad}
+            bottomInset={inputBottomInset}
           />
           ) : null}
         </KeyboardAvoidingView>

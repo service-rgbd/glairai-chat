@@ -1,6 +1,9 @@
 try {
-  const { registerGlobals } = require("@livekit/react-native");
-  registerGlobals({ autoConfigureAudioSession: true });
+  if (process.env.EXPO_PUBLIC_LIVEKIT_ENABLED === "true") {
+    const { registerGlobals } = require("@livekit/react-native");
+    // Ne pas toucher AVAudioSession au démarrage — évite les crashs natifs (clavier / auth).
+    registerGlobals({ autoConfigureAudioSession: false });
+  }
 } catch {
   // Expo Go / web : modules natifs LiveKit indisponibles.
 }

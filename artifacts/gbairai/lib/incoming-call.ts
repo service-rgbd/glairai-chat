@@ -14,20 +14,28 @@ type UiModeListener = (mode: IncomingCallUiMode) => void;
 
 let pendingCall: IncomingCallPayload | null = null;
 let uiMode: IncomingCallUiMode = "fullscreen";
+let callKitManaged = false;
 const listeners = new Set<Listener>();
 const uiModeListeners = new Set<UiModeListener>();
 
-export function setIncomingCall(call: IncomingCallPayload | null) {
+export function setIncomingCall(
+  call: IncomingCallPayload | null,
+  options?: { skipNativeDisplay?: boolean },
+) {
   pendingCall = call;
+  callKitManaged = call != null && options?.skipNativeDisplay === true;
   if (call) {
-    uiMode = "fullscreen";
-    for (const listener of uiModeListeners) {
-      listener(uiMode);
+    if (!callKitManaged) {
+      uiMode = "fullscreen";
+      for (const listener of uiModeListeners) {
+        listener(uiMode);
+      }
+      void import("@/lib/call-system-ui").then(({ displayNativeIncomingCall }) => {
+        void displayNativeIncomingCall(call);
+      });
     }
-    void import("@/lib/call-system-ui").then(({ displayNativeIncomingCall }) => {
-      displayNativeIncomingCall(call);
-    });
   } else {
+    callKitManaged = false;
     void import("@/lib/call-system-ui").then(({ endAllNativeCalls }) => {
       endAllNativeCalls();
     });
@@ -35,6 +43,10 @@ export function setIncomingCall(call: IncomingCallPayload | null) {
   for (const listener of listeners) {
     listener(pendingCall);
   }
+}
+
+export function isIncomingCallKitManaged() {
+  return callKitManaged;
 }
 
 export function getIncomingCall() {

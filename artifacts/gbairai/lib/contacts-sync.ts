@@ -3,11 +3,13 @@ const CONTACTS_SYNC_TTL_MS = 15 * 60 * 1000;
 type SyncState = {
   lastSyncedAt: number;
   inFlight: Promise<unknown> | null;
+  permissionDenied: boolean;
 };
 
 const syncState: SyncState = {
   lastSyncedAt: 0,
   inFlight: null,
+  permissionDenied: false,
 };
 
 export function markContactsSynced() {
@@ -17,6 +19,19 @@ export function markContactsSynced() {
 export function resetContactsSyncState() {
   syncState.lastSyncedAt = 0;
   syncState.inFlight = null;
+}
+
+export function resetContactsPermissionState() {
+  syncState.permissionDenied = false;
+}
+
+export function markContactsPermissionDenied() {
+  syncState.permissionDenied = true;
+  markContactsSynced();
+}
+
+export function isContactsPermissionDenied() {
+  return syncState.permissionDenied;
 }
 
 export function isContactsSyncFresh() {

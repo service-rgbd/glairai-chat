@@ -27,6 +27,7 @@ const colors = {
     headerBg: "#FFFFFF",
     tabBarBg: "#FFFFFF",
     missedCall: "#EF4444",
+    emojiIconPlate: "#E8EDF4",
   },
   dark: {
     text: "#F8FAFC",
@@ -56,6 +57,7 @@ const colors = {
     headerBg: "#0A0A0A",
     tabBarBg: "#0A0A0A",
     missedCall: "#EF4444",
+    emojiIconPlate: "rgba(255,255,255,0.16)",
   },
   radius: 16,
 };

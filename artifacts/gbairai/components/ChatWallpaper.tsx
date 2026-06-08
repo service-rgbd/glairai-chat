@@ -1,7 +1,13 @@
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
-import { StyleSheet, useColorScheme, View, type ViewProps } from "react-native";
+import {
+  Image as RNImage,
+  StyleSheet,
+  useColorScheme,
+  View,
+  type ViewProps,
+} from "react-native";
 
 import {
   getChatWallpaper,
@@ -25,7 +31,11 @@ export function ChatWallpaper({ wallpaperId, style, ...props }: ChatWallpaperPro
     const source = isDark && wallpaper.source.dark ? wallpaper.source.dark : wallpaper.source.light;
     return (
       <View style={[StyleSheet.absoluteFill, style]} pointerEvents="none" {...props}>
-        <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="center" />
+        {wallpaper.source.tile ? (
+          <RNImage source={source} resizeMode="repeat" style={StyleSheet.absoluteFill} />
+        ) : (
+          <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="center" />
+        )}
         {wallpaper.source.overlay ? (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: wallpaper.source.overlay }]} />
         ) : null}
@@ -84,7 +94,11 @@ export function ChatWallpaperPreview({
     const source = dark && wallpaper.source.dark ? wallpaper.source.dark : wallpaper.source.light;
     return (
       <View style={[styles.preview, { width: size, height: size, overflow: "hidden" }]}>
-        <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" />
+        {wallpaper.source.tile ? (
+          <RNImage source={source} resizeMode="repeat" style={StyleSheet.absoluteFill} />
+        ) : (
+          <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" />
+        )}
         {wallpaper.source.overlay ? (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: wallpaper.source.overlay }]} />
         ) : null}

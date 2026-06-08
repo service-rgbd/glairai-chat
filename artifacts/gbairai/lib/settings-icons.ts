@@ -1,3 +1,4 @@
+import type { Ionicons } from "@expo/vector-icons";
 import type { ImageSource } from "expo-image";
 
 export const SETTINGS_ICONS = {
@@ -18,5 +19,27 @@ export const SETTINGS_ICONS = {
   logout: require("@/assets/images/settings/logout.png"),
   menuGrid: require("@/assets/images/settings/menu-grid.png"),
 } as const satisfies Record<string, ImageSource>;
+
+type IonName = keyof typeof Ionicons.glyphMap;
+
+/** Icônes vectorielles en mode sombre (blanc sur fond dark). */
+export const SETTINGS_ION_ICONS: Partial<Record<keyof typeof SETTINGS_ICONS, IonName>> = {
+  profile: "person-circle-outline",
+  profilePhoto: "camera-outline",
+  editProfile: "create-outline",
+  calls: "call-outline",
+  wallpaper: "image-outline",
+  ringtone: "musical-notes-outline",
+  download: "download-outline",
+  wifi: "wifi-outline",
+  vibration: "phone-portrait-outline",
+  lock: "lock-closed-outline",
+  bell: "notifications-outline",
+  readReceipts: "checkmark-done-outline",
+  lastSeen: "eye-outline",
+  textSize: "text-outline",
+  logout: "log-out-outline",
+  menuGrid: "grid-outline",
+};
 
 export type SettingsIconKey = keyof typeof SETTINGS_ICONS;

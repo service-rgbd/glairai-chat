@@ -2,7 +2,7 @@ import { useAudioPlayer } from "expo-audio";
 import React, { useEffect, useMemo } from "react";
 
 import type { CallSoundPhase } from "@/lib/call-audio";
-import { getCallRingtoneAsset, useCallRingtone } from "@/lib/call-ringtone";
+import { getCallRingtoneSource, useCallRingtone } from "@/lib/call-ringtone";
 
 type Props = {
   phase: CallSoundPhase;
@@ -10,13 +10,13 @@ type Props = {
 };
 
 export function CallSoundController({ phase, variant = "outgoing" }: Props) {
-  const { ringtoneId } = useCallRingtone();
-  const ringAsset = useMemo(
-    () => getCallRingtoneAsset(ringtoneId, variant === "incoming" ? "incoming" : "outgoing"),
-    [ringtoneId, variant],
+  const { selection } = useCallRingtone();
+  const ringSource = useMemo(
+    () => getCallRingtoneSource(selection, variant === "incoming" ? "incoming" : "outgoing"),
+    [selection, variant],
   );
 
-  const ringPlayer = useAudioPlayer(ringAsset);
+  const ringPlayer = useAudioPlayer(ringSource);
   const connect = useAudioPlayer(require("@/assets/sounds/connect.wav"));
   const end = useAudioPlayer(require("@/assets/sounds/end.wav"));
 

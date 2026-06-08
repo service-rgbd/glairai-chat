@@ -11,6 +11,7 @@ import {
   Switch,
   Text,
   TouchableOpacity,
+  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,6 +20,7 @@ import { Avatar } from "@/components/Avatar";
 import { PasswordPromptModal } from "@/components/PasswordPromptModal";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppTheme } from "@/contexts/ThemeContext";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useChatWallpaper } from "@/hooks/useChatWallpaper";
 import { useColors } from "@/hooks/useColors";
@@ -33,23 +35,38 @@ import { getLocalDbStats } from "@/lib/local-db";
 import { getMediaCacheStats } from "@/lib/media-cache";
 import { purgeOfflineCacheForUser } from "@/lib/offline-cache";
 import { queryClient } from "@/lib/query-client";
-import { SETTINGS_ICONS, type SettingsIconKey } from "@/lib/settings-icons";
+import {
+  getThemePreferenceLabel,
+  THEME_PREFERENCE_OPTIONS,
+} from "@/lib/app-theme";
+import { SETTINGS_ICONS, SETTINGS_ION_ICONS, type SettingsIconKey } from "@/lib/settings-icons";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
 function SettingsIcon({
+  iconKey,
   image,
   sprite,
   ionIcon,
   ionColor,
+  destructive,
 }: {
+  iconKey?: SettingsIconKey;
   image?: ImageSource;
   sprite?: { source: ImageSource; column: number; row: number; columns?: number; rows?: number };
   ionIcon?: IconName;
   ionColor?: string;
+  destructive?: boolean;
 }) {
   const colors = useColors();
+  const isDark = useColorScheme() === "dark";
   const cellSize = 28;
+  const vectorColor = ionColor ?? (destructive ? colors.destructive : isDark ? "#FFFFFF" : colors.primary);
+  const mappedIon = iconKey ? SETTINGS_ION_ICONS[iconKey] : undefined;
+
+  if (isDark && mappedIon && !sprite) {
+    return <Ionicons name={mappedIon} size={22} color={vectorColor} />;
+  }
 
   if (image) {
     return <Image source={image} style={styles.settingsIconImage} contentFit="contain" />;
@@ -74,7 +91,7 @@ function SettingsIcon({
   }
 
   if (ionIcon) {
-    return <Ionicons name={ionIcon} size={20} color={ionColor ?? colors.primary} />;
+    return <Ionicons name={ionIcon} size={20} color={vectorColor} />;
   }
 
   return null;
@@ -87,6 +104,20 @@ function SettingsGroup({ children }: { children: React.ReactNode }) {
       {children}
     </View>
   );
+}
+
+function emojiIconBoxStyle(
+  colors: ReturnType<typeof useColors>,
+  isDark: boolean,
+  sprite?: boolean,
+) {
+  if (isDark) {
+    return [styles.iconBox, { backgroundColor: "rgba(255,255,255,0.08)" }];
+  }
+  if (sprite) {
+    return [styles.iconBox, { backgroundColor: "#1C1C1E" }];
+  }
+  return [styles.iconBox, { backgroundColor: colors.emojiIconPlate }];
 }
 
 function SettingsRow({
@@ -113,14 +144,20 @@ function SettingsRow({
   isLast?: boolean;
 }) {
   const colors = useColors();
+  const isDark = useColorScheme() === "dark";
   const iconImage = iconKey ? SETTINGS_ICONS[iconKey] : image;
-  const iconBoxStyle = sprite
-    ? [styles.iconBox, styles.iconBoxSprite]
-    : [styles.iconBox, { backgroundColor: colors.muted }];
+  const iconBoxStyle = emojiIconBoxStyle(colors, isDark, Boolean(sprite));
   const content = (
     <>
       <View style={iconBoxStyle}>
-        <SettingsIcon image={iconImage} sprite={sprite} ionIcon={ionIcon} ionColor={destructive ? colors.destructive : colors.primary} />
+        <SettingsIcon
+          iconKey={iconKey}
+          image={iconImage}
+          sprite={sprite}
+          ionIcon={ionIcon}
+          ionColor={destructive ? colors.destructive : colors.primary}
+          destructive={destructive}
+        />
       </View>
       <View style={styles.rowBody}>
         <Text style={[styles.rowLabel, { color: destructive ? colors.destructive : colors.text }]}>
@@ -179,16 +216,15 @@ function SettingsSwitchRow({
   isLast?: boolean;
 }) {
   const colors = useColors();
+  const isDark = useColorScheme() === "dark";
   const iconImage = iconKey ? SETTINGS_ICONS[iconKey] : image;
-  const iconBoxStyle = sprite
-    ? [styles.iconBox, styles.iconBoxSprite]
-    : [styles.iconBox, { backgroundColor: colors.muted }];
+  const iconBoxStyle = emojiIconBoxStyle(colors, isDark, Boolean(sprite));
   return (
     <View
       style={[styles.row, !isLast && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}
     >
       <View style={iconBoxStyle}>
-        <SettingsIcon image={iconImage} sprite={sprite} ionIcon={ionIcon} />
+        <SettingsIcon iconKey={iconKey} image={iconImage} sprite={sprite} ionIcon={ionIcon} />
       </View>
       <View style={styles.rowBody}>
         <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
@@ -230,8 +266,11 @@ export default function SettingsScreen() {
   }, []);
 
   const { currentUser, updateProfile, logout } = useAuth();
+  const { preference: themePreference, preferenceLabel: themeLabel, setPreference: setThemePreference, colorScheme: themeScheme } =
+    useAppTheme();
   const { wallpaper } = useChatWallpaper();
-  const { ringtoneId, ringtone, setRingtoneId } = useCallRingtone();
+  const { label: ringtoneLabel, selection, setPresetRingtone, setCustomRingtone, clearCustomRingtone } =
+    useCallRingtone();
   const { socketConnected } = useChats();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -317,10 +356,82 @@ export default function SettingsScreen() {
     await patchSettings({ chatFontScale: nextValue });
   };
 
-  const cycleRingtone = async () => {
-    const currentIndex = CALL_RINGTONES.findIndex((item) => item.id === ringtoneId);
-    const next = CALL_RINGTONES[(currentIndex + 1) % CALL_RINGTONES.length]!;
-    await setRingtoneId(next.id);
+  const openThemePicker = () => {
+    Alert.alert(
+      "Thème de l'application",
+      themePreference === "auto"
+        ? "Automatique : clair de 7h à 19h, sombre le reste du temps."
+        : undefined,
+      [
+        ...THEME_PREFERENCE_OPTIONS.map((option) => ({
+          text: getThemePreferenceLabel(option),
+          onPress: () => {
+            void setThemePreference(option);
+          },
+        })),
+        { text: "Annuler", style: "cancel" },
+      ],
+    );
+  };
+
+  const themeValueLabel =
+    themePreference === "auto"
+      ? `${themeLabel} · ${themeScheme === "dark" ? "Sombre" : "Clair"} maintenant`
+      : themeLabel;
+
+  const pickCustomRingtone = async () => {
+    try {
+      const DocumentPicker = await import("expo-document-picker");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["audio/*", "public.audio"],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      const asset = result.assets[0];
+      await setCustomRingtone(asset.uri, asset.name ?? "Son perso");
+    } catch {
+      Alert.alert(
+        "Sonnerie",
+        "Impossible d'ouvrir le sélecteur de fichiers. Les sonneries système iOS ne sont pas accessibles — choisissez un fichier audio (.m4a, .mp3, .wav).",
+      );
+    }
+  };
+
+  const openRingtonePicker = () => {
+    const buttons: Array<{ text: string; onPress?: () => void; style?: "cancel" | "destructive" }> =
+      CALL_RINGTONES.map((item) => ({
+        text: item.label,
+        onPress: () => {
+          void setPresetRingtone(item.id);
+        },
+      }));
+
+    buttons.push({
+      text: "Choisir un fichier audio…",
+      onPress: () => {
+        void pickCustomRingtone();
+      },
+    });
+
+    if (selection.kind === "custom") {
+      buttons.push({
+        text: "Revenir aux sonneries intégrées",
+        onPress: () => {
+          void clearCustomRingtone();
+        },
+      });
+    }
+
+    buttons.push({ text: "Annuler", style: "cancel" });
+
+    Alert.alert(
+      "Sonnerie d'appel",
+      Platform.OS === "ios"
+        ? "Les sonneries système iOS ne sont pas modifiables par l'app. Utilisez un fichier audio ou une sonnerie intégrée."
+        : "Choisissez une sonnerie intégrée ou un fichier audio sur l'appareil.",
+      buttons,
+    );
   };
 
   const saveProfile = async () => {
@@ -451,10 +562,16 @@ export default function SettingsScreen() {
             onPress={() => router.push("/(tabs)/chat-wallpaper")}
           />
           <SettingsRow
+            label="Thème"
+            value={themeValueLabel}
+            ionIcon="moon-outline"
+            onPress={openThemePicker}
+          />
+          <SettingsRow
             label="Sonnerie d'appel"
-            value={ringtone.label}
+            value={ringtoneLabel}
             iconKey="ringtone"
-            onPress={() => void cycleRingtone()}
+            onPress={openRingtonePicker}
             isLast
           />
         </SettingsGroup>
@@ -717,9 +834,6 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     overflow: "hidden",
-  },
-  iconBoxSprite: {
-    backgroundColor: "#1C1C1E",
   },
   rowBody: {
     flex: 1,

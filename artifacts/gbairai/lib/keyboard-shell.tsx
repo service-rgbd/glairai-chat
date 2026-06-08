@@ -11,22 +11,34 @@ type KeyboardAvoidingViewComponent = React.ComponentType<
 let KeyboardProvider: KeyboardProviderComponent | null = null;
 let KeyboardAvoidingView: KeyboardAvoidingViewComponent | null = null;
 
-if (!isExpoGo()) {
+const keyboardControllerEnabled =
+  process.env.EXPO_PUBLIC_KEYBOARD_CONTROLLER === "true" && !isExpoGo();
+
+if (keyboardControllerEnabled) {
   try {
-    // Chargé une seule fois au démarrage pour éviter un remount global tardif.
     const module = require("react-native-keyboard-controller") as {
       KeyboardProvider: KeyboardProviderComponent;
       KeyboardAvoidingView: KeyboardAvoidingViewComponent;
     };
     KeyboardProvider = module.KeyboardProvider;
     KeyboardAvoidingView = module.KeyboardAvoidingView;
-  } catch {
-    // Module natif indisponible (web, tests).
+    if (__DEV__) {
+      console.log("[Gbairai] keyboard-controller actif");
+    }
+  } catch (error) {
+    if (__DEV__) {
+      console.warn("[Gbairai] keyboard-controller indisponible", error);
+    }
   }
+} else if (__DEV__ && !isExpoGo()) {
+  console.log("[Gbairai] keyboard-controller désactivé (KeyboardAvoidingView natif)");
 }
 
-export function AppKeyboardProvider({ children }: ProviderProps) {
-  if (!KeyboardProvider || isExpoGo()) {
+export function AppKeyboardProvider({
+  children,
+  enabled = true,
+}: ProviderProps & { enabled?: boolean }) {
+  if (!enabled || !KeyboardProvider || isExpoGo()) {
     return <>{children}</>;
   }
 

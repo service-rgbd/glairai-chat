@@ -1,7 +1,7 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import { Image, type ImageSource } from "expo-image";
+import type { ImageSource } from "expo-image";
 import React, { useMemo } from "react";
 import {
   Platform,
@@ -13,12 +13,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { EmojiNavImage } from "@/components/EmojiNavImage";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import { openGlobalSearch } from "@/lib/navigation";
 
 const ACTIVE = "#3390EC";
 const BADGE_RED = "#FF3B30";
+const DARK_ICON = "#FFFFFF";
 
 const VISIBLE_TABS = ["calls", "index", "status", "settings"] as const;
 
@@ -27,6 +29,16 @@ const TAB_ICONS: Record<string, ImageSource> = {
   index: require("@/assets/images/nav/chats.png"),
   status: require("@/assets/images/nav/status.png"),
   settings: require("@/assets/images/nav/settings.png"),
+};
+
+const TAB_ION: Record<
+  string,
+  { outline: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }
+> = {
+  calls: { outline: "call-outline", filled: "call" },
+  index: { outline: "chatbubbles-outline", filled: "chatbubbles" },
+  status: { outline: "disc-outline", filled: "disc" },
+  settings: { outline: "settings-outline", filled: "settings" },
 };
 
 function GlassSurface({
@@ -74,7 +86,6 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
   );
 
   const labelInactive = isDark ? "rgba(255,255,255,0.78)" : colors.mutedForeground;
-  const activeHighlight = isDark ? "rgba(255,255,255,0.10)" : "rgba(51,144,236,0.10)";
 
   return (
     <View
@@ -91,7 +102,9 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
           const isFocused = focusedRouteName === route.name;
           const label = options.title ?? route.name;
           const iconSource = TAB_ICONS[route.name];
+          const ion = TAB_ION[route.name];
           const labelColor = isFocused ? ACTIVE : labelInactive;
+          const iconColor = isFocused ? ACTIVE : isDark ? DARK_ICON : colors.mutedForeground;
 
           const onPress = () => {
             const event = navigation.emit({
@@ -126,27 +139,26 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
               activeOpacity={0.75}
               style={styles.tab}
             >
-              <View
-                style={[
-                  styles.tabInner,
-                  isFocused ? { backgroundColor: activeHighlight } : null,
-                ]}
-              >
+              <View style={styles.tabInner}>
                 <View style={styles.iconWrap}>
-                  {iconSource ? (
-                    <Image
+                  {isDark && ion ? (
+                    <Ionicons
+                      name={isFocused ? ion.filled : ion.outline}
+                      size={26}
+                      color={iconColor}
+                    />
+                  ) : iconSource ? (
+                    <EmojiNavImage
                       source={iconSource}
-                      style={[
-                        styles.tabIcon,
-                        { transform: [{ scale: isFocused ? 1.08 : 1 }] },
-                      ]}
-                      contentFit="contain"
+                      size={28}
+                      focused={isFocused}
+                      style={{ transform: [{ scale: isFocused ? 1.08 : 1 }] }}
                     />
                   ) : (
                     <Ionicons
                       name="ellipse-outline"
                       size={24}
-                      color={isFocused ? ACTIVE : labelInactive}
+                      color={iconColor}
                     />
                   )}
                   {badge != null && badge !== 0 ? (
@@ -181,7 +193,7 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
           accessibilityRole="button"
           accessibilityLabel="Rechercher"
         >
-          <Ionicons name="search" size={22} color={isDark ? "#FFFFFF" : colors.text} />
+          <Ionicons name="search" size={22} color={isDark ? DARK_ICON : colors.text} />
         </TouchableOpacity>
       </GlassSurface>
     </View>
@@ -235,7 +247,6 @@ const styles = StyleSheet.create({
   tabInner: {
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 999,
     paddingHorizontal: 4,
     paddingVertical: 6,
     minWidth: 48,
@@ -246,10 +257,6 @@ const styles = StyleSheet.create({
     height: 30,
     alignItems: "center",
     justifyContent: "center",
-  },
-  tabIcon: {
-    width: 28,
-    height: 28,
   },
   label: {
     fontSize: 9,

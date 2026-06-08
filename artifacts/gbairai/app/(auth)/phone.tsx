@@ -4,6 +4,9 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  InteractionManager,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -16,7 +19,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AuthLogo } from "@/components/AuthLogo";
-import { SafeKeyboardAvoidingView } from "@/components/SafeKeyboardAvoidingView";
 import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -54,7 +56,10 @@ export default function PhoneScreen() {
     try {
       const fullPhone = `${selectedCountry.callingCode}${digitsOnly}`;
       await requestOtpForPhone(fullPhone, selectedCountry.code);
-      router.push("/(auth)/otp");
+      Keyboard.dismiss();
+      InteractionManager.runAfterInteractions(() => {
+        router.push("/(auth)/otp");
+      });
     } catch (error) {
       Alert.alert(
         "Envoi impossible",
@@ -68,9 +73,9 @@ export default function PhoneScreen() {
   const isValid = Boolean(selectedCountry) && digitsOnly.length >= 6;
 
   return (
-    <SafeKeyboardAvoidingView
+    <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: colors.background }]}
-      behavior="padding"
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? topPad : 0}
     >
       <ScrollView
@@ -184,7 +189,7 @@ export default function PhoneScreen() {
           />
         </View>
       </Modal>
-    </SafeKeyboardAvoidingView>
+    </KeyboardAvoidingView>
   );
 }
 

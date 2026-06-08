@@ -44,6 +44,7 @@ import { useQueryHydrated } from "@/contexts/QueryHydrationContext";
 import { getApiBaseUrl } from "@/lib/api-config";
 import {
   isContactsSyncFresh,
+  markContactsPermissionDenied,
   markContactsSynced,
   resetContactsSyncState,
   runContactsSyncOnce,
@@ -52,7 +53,7 @@ import { UserCacheKeys, migrateLegacyUserCache } from "@/lib/offline-cache";
 import { setIncomingCall, clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
 import { shouldAcceptIncomingCall } from "@/lib/call-session-client";
 import { fetchPendingIncomingCall } from "@/lib/calls";
-import { emitCallSignal } from "@/lib/call-signaling";
+import { beginPushSetupSession, resetPushSetupSession } from "@/lib/push-setup-session";
 import { countUnreadMissedCalls } from "@/lib/call-badge";
 import { logConversationCall } from "@/lib/call-log";
 import { isNativeLocalDbEnabled } from "@/lib/local-cache-enabled";
@@ -82,6 +83,14 @@ import {
   getMessageDisplayContent,
 } from "@/lib/message-meta";
 import { runWithUploadStatus } from "@/lib/upload-status";
+import {
+  ensureE2eDeviceRegistered,
+  encryptDirectTextMessage,
+  isE2eEnabled,
+  isE2ePayload,
+  shouldEncryptDirectText,
+  tryDecryptDirectTextMessage,
+} from "@/lib/e2e";
 
 import type {
   ChatsContextType,
@@ -308,12 +317,29 @@ function patchParticipantPresence(
   }));
 }
 
-function toReadableMessageContent(message: Pick<ConversationMessage, "content">) {
-  return getMessageDisplayContent(message.content).displayContent;
+function getDirectPeerUserId(
+  conversation: Pick<ConversationSummary, "type" | "participants">,
+  currentUserId: string,
+) {
+  if (conversation.type !== "direct") return null;
+  return conversation.participants.find((participant) => participant.userId !== currentUserId)
+    ?.userId ?? null;
 }
 
-function toGMessageMeta(message: Pick<ConversationMessage, "content">) {
-  const { isDeleted, editedAt } = getMessageDisplayContent(message.content);
+function toReadableMessageContent(
+  message: Pick<ConversationMessage, "content">,
+  decryptedContent?: string,
+) {
+  const source = decryptedContent ?? message.content;
+  return getMessageDisplayContent(source).displayContent;
+}
+
+function toGMessageMeta(
+  message: Pick<ConversationMessage, "content">,
+  decryptedContent?: string,
+) {
+  const source = decryptedContent ?? message.content;
+  const { isDeleted, editedAt } = getMessageDisplayContent(source);
   return { isDeleted, editedAt };
 }
 
@@ -484,13 +510,14 @@ function toGMessage(
   message: ConversationMessage,
   currentUserId: string,
   toMessageStatus: (message: ConversationMessage, currentUserId: string) => MessageStatus,
+  decryptedContent?: string,
 ): GMessage {
-  const meta = toGMessageMeta(message);
+  const meta = toGMessageMeta(message, decryptedContent);
   return {
     id: message.id,
     chatId: message.conversationId,
     senderId: message.senderId,
-    content: toReadableMessageContent(message),
+    content: toReadableMessageContent(message, decryptedContent),
     type: meta.isDeleted ? "text" : message.type,
     status: toMessageStatus(message, currentUserId),
     timestamp: message.createdAt,
@@ -520,6 +547,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const [localStorageReady, setLocalStorageReady] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [typingByConversation, setTypingByConversation] = useState<Record<string, string[]>>({});
+  const [e2eDecryptCache, setE2eDecryptCache] = useState<Record<string, string>>({});
+  const e2eDecryptInflightRef = useRef(new Set<string>());
+  const e2eDecryptCacheRef = useRef<Record<string, string>>({});
   const socketRef = useRef<Socket | null>(null);
   const isFlushingOutbox = useRef(false);
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -792,8 +822,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     isFlushingOutbox.current = true;
     try {
       for (const queued of outbox.filter((item) => item.status === "failed")) {
+        const wireContent = await maybeEncryptTextPayload(
+          queued.chatId,
+          queued.content,
+          queued.type,
+        );
         const sentMessage = await sendConversationMessage(queued.chatId, {
-          content: queued.content,
+          content: wireContent,
           type: queued.type,
         } satisfies SendMessageInput);
         queryClient.setQueryData<MessagesPage>(["messages", queued.chatId], (current) => ({
@@ -1228,26 +1263,47 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!authToken || !currentUser?.settings.notificationsEnabled) return;
+    if (!beginPushSetupSession(authToken)) return;
 
     const registerPush = async () => {
-      const { registerForPushNotificationsAsync } = await import("@/lib/notifications");
-      const pushToken = await registerForPushNotificationsAsync();
-
-      const registerDevice = async (voipPushToken?: string) => {
+      try {
+        const { registerForPushNotificationsAsync } = await import("@/lib/notifications");
+        const pushToken = await registerForPushNotificationsAsync();
         if (!pushToken) return;
-        await registerPushDevice(pushToken, "Expo device", voipPushToken);
-      };
 
-      const { setupVoipPushRegistration } = await import("@/lib/voip-push");
-      setupVoipPushRegistration((voipToken) => {
-        void registerDevice(voipToken);
-      });
+        try {
+          await registerPushDevice(pushToken, "Expo device");
+        } catch (error) {
+          if (__DEV__) {
+            console.warn("[Gbairai] enregistrement push échoué", error);
+          }
+        }
 
-      await registerDevice();
+        const { prepareVoipPushListeners } = await import("@/lib/voip-push");
+        if (__DEV__) {
+          console.log("[Gbairai] push Expo enregistré");
+        }
+        prepareVoipPushListeners((voipToken) => {
+          void registerPushDevice(pushToken, "Expo device", voipToken).catch((error) => {
+            if (__DEV__) {
+              console.warn("[Gbairai] enregistrement VoIP échoué", error);
+            }
+          });
+        });
+      } catch (error) {
+        if (__DEV__) {
+          console.warn("[Gbairai] permissions push échouées", error);
+        }
+      }
     };
 
     void registerPush();
-  }, [authToken, currentUser?.settings.notificationsEnabled]);
+  }, [authToken, currentUser?.settings.notificationsEnabled, registerPushDevice]);
+
+  useEffect(() => {
+    if (isAuthenticated) return;
+    resetPushSetupSession();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!authToken || !currentUser?.id) return;
@@ -1333,11 +1389,35 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     if (isAuthenticated) return;
     resetContactsSyncState();
     setTypingByConversation({});
+    setE2eDecryptCache({});
+    e2eDecryptCacheRef.current = {};
+    e2eDecryptInflightRef.current.clear();
     lastReadMessageByChatRef.current = {};
     activeConversationIdsRef.current.clear();
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    e2eDecryptCacheRef.current = e2eDecryptCache;
+  }, [e2eDecryptCache]);
+
+  useEffect(() => {
+    if (!isE2eEnabled() || !currentUser?.id) return;
+    void ensureE2eDeviceRegistered(currentUser.id).catch((error) => {
+      if (__DEV__) {
+        console.warn("[Gbairai] E2E bootstrap:", error);
+      }
+    });
+  }, [currentUser?.id]);
+
   const conversationSummaries = conversationsQuery.data?.conversations ?? [];
+
+  const conversationById = useMemo(() => {
+    const map = new Map<string, ConversationSummary>();
+    for (const conversation of conversationSummaries) {
+      map.set(conversation.id, conversation);
+    }
+    return map;
+  }, [conversationSummaries]);
 
   const users = useMemo(() => {
     const nextUsers: Record<string, GUser> = {};
@@ -1430,7 +1510,12 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             isArchived: Boolean(extended.isArchived),
             lastMessage:
               conversation.lastMessage && currentUser
-                ? toGMessage(conversation.lastMessage, currentUser.id, toMessageStatus)
+                ? toGMessage(
+                    conversation.lastMessage,
+                    currentUser.id,
+                    toMessageStatus,
+                    e2eDecryptCache[conversation.lastMessage.id],
+                  )
                 : undefined,
           };
         });
@@ -1438,7 +1523,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
       return INITIAL_CHATS;
     },
-    [conversationSummaries, currentUser, isAuthenticated],
+    [conversationSummaries, currentUser, e2eDecryptCache, isAuthenticated],
   );
 
   const messages = useMemo<Record<string, GMessage[]>>(() => {
@@ -1452,7 +1537,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       const chatId = knownConversationIds[index];
       if (!chatId) continue;
       record[chatId] = page.messages.map((message) =>
-        toGMessage(message, currentUser.id, toMessageStatus),
+        toGMessage(message, currentUser.id, toMessageStatus, e2eDecryptCache[message.id]),
       );
     }
 
@@ -1473,7 +1558,81 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     }
 
     return record;
-  }, [currentUser, currentUserId, isAuthenticated, knownConversationIds, messageQueries, outbox]);
+  }, [currentUser, currentUserId, e2eDecryptCache, isAuthenticated, knownConversationIds, messageQueries, outbox]);
+
+  useEffect(() => {
+    if (!isE2eEnabled() || !currentUser?.id) return;
+
+    const pending: Array<{ id: string; content: string; senderId: string }> = [];
+
+    for (const conversation of conversationSummaries) {
+      const lastMessage = conversation.lastMessage;
+      if (!lastMessage || !isE2ePayload(lastMessage.content)) continue;
+      if (e2eDecryptCacheRef.current[lastMessage.id]) continue;
+      if (e2eDecryptInflightRef.current.has(lastMessage.id)) continue;
+      pending.push({
+        id: lastMessage.id,
+        content: lastMessage.content,
+        senderId: lastMessage.senderId,
+      });
+    }
+
+    for (const query of messageQueries) {
+      const page = query.data;
+      if (!page) continue;
+      for (const message of page.messages) {
+        if (!isE2ePayload(message.content)) continue;
+        if (e2eDecryptCacheRef.current[message.id]) continue;
+        if (e2eDecryptInflightRef.current.has(message.id)) continue;
+        pending.push({
+          id: message.id,
+          content: message.content,
+          senderId: message.senderId,
+        });
+      }
+    }
+
+    if (!pending.length) return;
+
+    let cancelled = false;
+    void (async () => {
+      const updates: Record<string, string> = {};
+      for (const item of pending) {
+        if (cancelled) break;
+        e2eDecryptInflightRef.current.add(item.id);
+        try {
+          updates[item.id] = await tryDecryptDirectTextMessage(
+            currentUser.id,
+            item.senderId,
+            item.content,
+          );
+        } finally {
+          e2eDecryptInflightRef.current.delete(item.id);
+        }
+      }
+      if (!cancelled && Object.keys(updates).length > 0) {
+        setE2eDecryptCache((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationSummaries, currentUser?.id, messageQueries]);
+
+  const maybeEncryptTextPayload = useCallback(
+    async (chatId: string, content: string, messageType: string) => {
+      if (!shouldEncryptDirectText(conversationById.get(chatId)?.type ?? "", messageType)) {
+        return content;
+      }
+      const conversation = conversationById.get(chatId);
+      if (!conversation || !currentUser?.id) return content;
+      const peerUserId = getDirectPeerUserId(conversation, currentUser.id);
+      if (!peerUserId) return content;
+      return encryptDirectTextMessage(currentUser.id, peerUserId, content);
+    },
+    [conversationById, currentUser?.id],
+  );
 
   const sendMessage = (chatId: string, content: string) => {
     const payload = {
@@ -1488,8 +1647,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     const sendNow = async () => {
       setOutbox((prev) => [...prev, payload]);
       try {
+        const wireContent = await maybeEncryptTextPayload(chatId, content, "text");
         const sentMessage = await sendConversationMessage(chatId, {
-          content,
+          content: wireContent,
           type: "text",
         });
         queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
@@ -1690,10 +1850,11 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     }));
 
     try {
+      const wireContent = await maybeEncryptTextPayload(chatId, trimmed, "text");
       const updatedMessage = await customFetch<ConversationMessage>(`/api/messages/${messageId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: trimmed }),
+        body: JSON.stringify({ content: wireContent }),
       });
       queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
         messages: upsertConversationMessage(current?.messages ?? [], updatedMessage),
@@ -1759,36 +1920,43 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       ),
     }));
 
+    const readReceiptsEnabled = currentUser?.settings.readReceiptsEnabled ?? true;
+
     const mark = async () => {
-      queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => {
-        if (!current || !currentUser?.id) {
-          return current;
-        }
+      if (readReceiptsEnabled) {
+        queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => {
+          if (!current || !currentUser?.id) {
+            return current;
+          }
 
-        const now = new Date().toISOString();
-        return {
-          ...current,
-          messages: current.messages.map((message) => {
-            if (
-              message.senderId === currentUser.id ||
-              message.createdAt > lastIncomingMessage.timestamp
-            ) {
-              return message;
-            }
+          const now = new Date().toISOString();
+          return {
+            ...current,
+            messages: current.messages.map((message) => {
+              if (
+                message.senderId === currentUser.id ||
+                message.createdAt > lastIncomingMessage.timestamp
+              ) {
+                return message;
+              }
 
-            return {
-              ...message,
-              receipts: upsertReceipt(message.receipts, {
-                messageId: message.id,
-                conversationId: chatId,
-                userId: currentUser.id,
-                deliveredAt: now,
-                readAt: now,
-              }),
-            };
-          }),
-        };
-      });
+              return {
+                ...message,
+                receipts: upsertReceipt(message.receipts, {
+                  messageId: message.id,
+                  conversationId: chatId,
+                  userId: currentUser.id,
+                  deliveredAt: now,
+                  readAt: now,
+                }),
+              };
+            }),
+          };
+        });
+      }
+
+      if (!readReceiptsEnabled) return;
+
       if (socketRef.current?.connected) {
         socketRef.current.emit("messages:read", {
           conversationId: chatId,
@@ -1831,7 +1999,6 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify(input),
     });
     await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    resetContactsSyncState();
   };
 
   const createStory = async (
@@ -2088,12 +2255,17 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const syncPhoneContacts = async () => {
     const Contacts = await import("expo-contacts");
     const existingPermission = await Contacts.getPermissionsAsync();
-    const permission =
-      existingPermission.status === "granted"
-        ? existingPermission
-        : await Contacts.requestPermissionsAsync();
-    if (permission.status !== "granted") {
-      return [];
+
+    if (existingPermission.status !== "granted") {
+      if (existingPermission.status === "denied" || existingPermission.canAskAgain === false) {
+        markContactsPermissionDenied();
+        return [];
+      }
+      const permission = await Contacts.requestPermissionsAsync();
+      if (permission.status !== "granted") {
+        markContactsPermissionDenied();
+        return [];
+      }
     }
 
     const allContacts: ExpoContacts.Contact[] = [];
@@ -2192,7 +2364,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       composeContactsRef.current = mergedContacts;
       return mergedContacts;
     },
-    [currentUser?.countryCode, users],
+    [currentUser?.countryCode],
   );
 
   const updateSavedContactName = async (phone: string, contactName: string) => {

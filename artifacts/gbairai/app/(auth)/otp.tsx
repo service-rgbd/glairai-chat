@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,7 +15,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AuthLogo } from "@/components/AuthLogo";
-import { SafeKeyboardAvoidingView } from "@/components/SafeKeyboardAvoidingView";
 import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { isOtpDemoDevMode } from "@/lib/api-config";
@@ -25,10 +25,10 @@ export default function OtpScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { pendingOtpCode, pendingPhone, requestOtpForPhone, pendingCountryCode, verifyPendingOtp } = useAuth();
-  const [digits, setDigits] = useState<string[]>(Array(CODE_LENGTH).fill(""));
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(59);
-  const inputRefs = useRef<(TextInput | null)[]>([]);
+  const inputRef = useRef<TextInput>(null);
   const autoFilledRef = useRef(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -49,26 +49,11 @@ export default function OtpScreen() {
       return;
     }
     autoFilledRef.current = true;
-    setDigits(demoCode.split(""));
+    setCode(demoCode);
   }, [pendingOtpCode]);
 
-  const handleDigit = (index: number, val: string) => {
-    const digit = val.replace(/\D/g, "").slice(-1);
-    const updated = [...digits];
-    updated[index] = digit;
-    setDigits(updated);
-    if (digit && index < CODE_LENGTH - 1) {
-      inputRefs.current[index + 1]?.focus();
-    }
-  };
-
-  const handleKeyPress = (index: number, key: string) => {
-    if (key === "Backspace" && !digits[index] && index > 0) {
-      const updated = [...digits];
-      updated[index - 1] = "";
-      setDigits(updated);
-      inputRefs.current[index - 1]?.focus();
-    }
+  const handleCodeChange = (value: string) => {
+    setCode(value.replace(/\D/g, "").slice(0, CODE_LENGTH));
   };
 
   const handleVerify = async (_code: string) => {
@@ -82,21 +67,16 @@ export default function OtpScreen() {
         "Code invalide",
         error instanceof Error ? error.message : "Impossible de vérifier le code",
       );
-      setDigits(Array(CODE_LENGTH).fill(""));
-      inputRefs.current[0]?.focus();
+      setCode("");
     } finally {
       setLoading(false);
     }
   };
 
-  const isFull = digits.every((d) => d !== "");
+  const isFull = code.length === CODE_LENGTH;
 
   return (
-    <SafeKeyboardAvoidingView
-      style={[styles.root, { backgroundColor: colors.background }]}
-      behavior="padding"
-      keyboardVerticalOffset={Platform.OS === "ios" ? topPad : 0}
-    >
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[
@@ -141,29 +121,22 @@ export default function OtpScreen() {
           )
         ) : null}
 
-        <View style={styles.codeRow}>
-          {digits.map((digit, i) => (
-            <TextInput
+        <Pressable style={styles.codeRow} onPress={() => inputRef.current?.focus()}>
+          {Array.from({ length: CODE_LENGTH }, (_, i) => (
+            <View
               key={i}
-              ref={(r) => { inputRefs.current[i] = r; }}
               style={[
                 styles.cell,
                 {
-                  color: colors.text,
-                  borderColor: digit ? colors.primary : colors.border,
+                  borderColor: code[i] ? colors.primary : colors.border,
                   backgroundColor: colors.card,
                 },
               ]}
-              value={digit}
-              onChangeText={(v) => handleDigit(i, v)}
-              onKeyPress={({ nativeEvent }) => handleKeyPress(i, nativeEvent.key)}
-              keyboardType="number-pad"
-              maxLength={1}
-              autoFocus={i === 0}
-              selectTextOnFocus
-            />
+            >
+              <Text style={[styles.cellText, { color: colors.text }]}>{code[i] ?? ""}</Text>
+            </View>
           ))}
-        </View>
+        </Pressable>
 
         <View style={styles.resend}>
           {countdown > 0 ? (
@@ -191,10 +164,20 @@ export default function OtpScreen() {
         </View>
       </ScrollView>
 
+      <TextInput
+        ref={inputRef}
+        value={code}
+        onChangeText={handleCodeChange}
+        keyboardType="number-pad"
+        maxLength={CODE_LENGTH}
+        caretHidden
+        style={styles.hiddenInput}
+      />
+
       <View style={[styles.footer, { paddingBottom: bottomPad + 16 }]}>
         <TouchableOpacity
           style={[styles.btn, { backgroundColor: isFull ? colors.primary : colors.muted }]}
-          onPress={() => handleVerify(digits.join(""))}
+          onPress={() => handleVerify(code)}
           disabled={!isFull || loading}
           activeOpacity={0.85}
         >
@@ -205,7 +188,7 @@ export default function OtpScreen() {
           )}
         </TouchableOpacity>
       </View>
-    </SafeKeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -241,9 +224,20 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 12,
     borderWidth: 1.5,
-    textAlign: "center",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cellText: {
     fontSize: 24,
     fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  hiddenInput: {
+    position: "absolute",
+    opacity: 0,
+    width: 1,
+    height: 1,
+    left: -9999,
   },
   resend: { alignItems: "center" },
   resendText: { fontSize: 14, fontFamily: "Inter_400Regular" },

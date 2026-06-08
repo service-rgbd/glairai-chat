@@ -26,6 +26,7 @@ import {
   clearIncomingCallIfMatches,
   getIncomingCall,
   getIncomingCallUiMode,
+  isIncomingCallKitManaged,
   setIncomingCallUiMode,
   subscribeIncomingCall,
   subscribeIncomingCallUiMode,
@@ -67,7 +68,7 @@ export function IncomingCallOverlay() {
     });
   }, [incoming]);
 
-  if (!incoming) return null;
+  if (!incoming || isIncomingCallKitManaged()) return null;
 
   const caller = users[incoming.callerUserId];
   const callerName = incoming.callerName || caller?.name || "Contact";

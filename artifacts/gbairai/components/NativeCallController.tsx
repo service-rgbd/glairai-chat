@@ -3,6 +3,7 @@ import { useEffect } from "react";
 
 import {
   endNativeCall,
+  registerNativeCallHandlers,
   setupNativeCallUi,
 } from "@/lib/call-system-ui";
 import { clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
@@ -10,18 +11,21 @@ import { useChats } from "@/contexts/chats-context-ref";
 import { useAuth } from "@/contexts/AuthContext";
 import { signalConversationCall } from "@/lib/calls";
 import { logConversationCall } from "@/lib/call-log";
+import { afterAuthNativeDelay } from "@/lib/post-auth-native-delay";
 
 /**
  * Pont CallKit / ConnectionService ↔ navigation in-app.
- * No-op en Expo Go (stub Metro).
+ * Avec VoIP actif : handlers seulement au login, CallKit s'initialise à l'appel entrant.
  */
 export function NativeCallController() {
   const { authToken } = useAuth();
   const { recordCall } = useChats();
 
   useEffect(() => {
-    return void setupNativeCallUi({
-      onAnswer: (callId) => {
+    let cancelled = false;
+
+    const handlers = {
+      onAnswer: (callId: string) => {
         const incoming = getIncomingCall();
         if (!incoming || incoming.callId !== callId) return;
 
@@ -46,7 +50,7 @@ export function NativeCallController() {
           },
         });
       },
-      onEnd: (callId) => {
+      onEnd: (callId: string) => {
         const incoming = getIncomingCall();
         if (!incoming || incoming.callId !== callId) return;
 
@@ -90,7 +94,28 @@ export function NativeCallController() {
           clearIncomingCallIfMatches(callId);
         })();
       },
+    };
+
+    registerNativeCallHandlers(handlers);
+
+    const cancelDelay = afterAuthNativeDelay(() => {
+      if (cancelled) return;
+      void setupNativeCallUi(handlers).then((ok) => {
+        if (__DEV__) {
+          console.log("[Gbairai] CallKit bootstrap", ok ? "ok" : "différé (VoIP)");
+        }
+        if (ok) {
+          void import("@/lib/voip-push").then(({ requestVoipPushTokenAfterCallKit }) => {
+            requestVoipPushTokenAfterCallKit();
+          });
+        }
+      });
     });
+
+    return () => {
+      cancelled = true;
+      cancelDelay();
+    };
   }, [authToken, recordCall]);
 
   return null;

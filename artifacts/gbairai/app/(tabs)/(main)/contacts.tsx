@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -33,6 +33,8 @@ export default function ContactsScreen() {
   const [renameTarget, setRenameTarget] = useState<ComposeContactOption | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
+  const getComposeContactsRef = useRef(getComposeContacts);
+  getComposeContactsRef.current = getComposeContacts;
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -44,11 +46,13 @@ export default function ContactsScreen() {
   }, [composeContactsSnapshot]);
 
   useEffect(() => {
+    if (composeContactsSnapshot.length > 0) return;
+
     let cancelled = false;
 
     const load = async () => {
       try {
-        const next = await getComposeContacts();
+        const next = await getComposeContactsRef.current();
         if (!cancelled) {
           setContacts(next);
         }
@@ -63,7 +67,7 @@ export default function ContactsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [getComposeContacts]);
+  }, [composeContactsSnapshot.length]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();

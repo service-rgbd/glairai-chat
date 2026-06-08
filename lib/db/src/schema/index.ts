@@ -204,6 +204,38 @@ export const deviceTokensTable = pgTable("device_tokens", {
   userIdx: index("device_tokens_user_idx").on(table.userId),
 }));
 
+export const e2eDevicesTable = pgTable("e2e_devices", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => usersTable.id, { onDelete: "cascade" }),
+  deviceId: text("device_id").notNull(),
+  registrationId: integer("registration_id").notNull(),
+  identityKeyPublic: text("identity_key_public").notNull(),
+  signedPreKeyId: integer("signed_pre_key_id").notNull(),
+  signedPreKeyPublic: text("signed_pre_key_public").notNull(),
+  signedPreKeySignature: text("signed_pre_key_signature").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  userDeviceIdx: uniqueIndex("e2e_devices_user_device_idx").on(table.userId, table.deviceId),
+  userIdx: index("e2e_devices_user_idx").on(table.userId),
+}));
+
+export const e2eOneTimePreKeysTable = pgTable("e2e_one_time_prekeys", {
+  id: text("id").primaryKey(),
+  deviceRowId: text("device_row_id")
+    .notNull()
+    .references(() => e2eDevicesTable.id, { onDelete: "cascade" }),
+  keyId: integer("key_id").notNull(),
+  publicKey: text("public_key").notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  deviceKeyIdx: uniqueIndex("e2e_one_time_prekeys_device_key_idx").on(table.deviceRowId, table.keyId),
+  deviceIdx: index("e2e_one_time_prekeys_device_idx").on(table.deviceRowId),
+}));
+
 export const userBlocksTable = pgTable(
   "user_blocks",
   {

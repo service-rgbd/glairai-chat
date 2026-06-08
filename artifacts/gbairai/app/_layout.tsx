@@ -15,20 +15,26 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AuthenticatedIncomingCallOverlay } from "@/components/AuthenticatedIncomingCallOverlay";
 import { AuthenticatedNativeCallController } from "@/components/AuthenticatedNativeCallController";
-import { IncomingCallOverlay } from "@/components/IncomingCallOverlay";
 import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatsProvider } from "@/contexts/ChatsContext";
-import { AppKeyboardProvider } from "@/lib/keyboard-shell";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import { queryClient } from "@/lib/query-client";
 import { getApiBaseUrl } from "@/lib/api-config";
 import { setupPushNotificationRouting } from "@/lib/notifications";
 
 SplashScreen.preventAutoHideAsync();
 
-function AppShell({ children }: { children: React.ReactNode }) {
-  return <AppKeyboardProvider>{children}</AppKeyboardProvider>;
+function RootAppBody() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthenticatedIncomingCallOverlay />
+      <AuthenticatedNativeCallController />
+      <RootStack />
+    </GestureHandlerRootView>
+  );
 }
 
 function RootStack() {
@@ -77,21 +83,17 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            <PersistedQueryProvider>
-              <ChatsProvider>
-                <GestureHandlerRootView style={{ flex: 1 }}>
-                  <AppShell>
-                    <IncomingCallOverlay />
-                    <AuthenticatedNativeCallController />
-                    <RootStack />
-                  </AppShell>
-                </GestureHandlerRootView>
-              </ChatsProvider>
-            </PersistedQueryProvider>
-          </AuthProvider>
-        </QueryClientProvider>
+        <ThemeProvider>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <PersistedQueryProvider>
+                <ChatsProvider>
+                  <RootAppBody />
+                </ChatsProvider>
+              </PersistedQueryProvider>
+            </AuthProvider>
+          </QueryClientProvider>
+        </ThemeProvider>
       </ErrorBoundary>
     </SafeAreaProvider>
   );

@@ -3,7 +3,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -35,6 +35,69 @@ import {
 import { STORY_QUICK_REACTIONS } from "@/lib/story-reactions";
 
 const STORY_DURATION_MS = 5000;
+
+function safePlayerAction(action: () => void) {
+  try {
+    action();
+  } catch {
+    // Le player natif peut être libéré pendant une navigation rapide.
+  }
+}
+
+type StoryVideoPlayerProps = {
+  url: string;
+  paused: boolean;
+  onProgress: (ratio: number) => void;
+  onEnded: () => void;
+};
+
+function StoryVideoPlayer({ url, paused, onProgress, onEnded }: StoryVideoPlayerProps) {
+  const player = useVideoPlayer(url, (instance) => {
+    instance.loop = false;
+  });
+  const endedRef = useRef(false);
+
+  useEffect(() => {
+    endedRef.current = false;
+  }, [url]);
+
+  useEffect(() => {
+    if (paused) {
+      safePlayerAction(() => player.pause());
+      return;
+    }
+    safePlayerAction(() => player.play());
+  }, [paused, player, url]);
+
+  useEffect(() => {
+    if (paused) return;
+
+    const interval = setInterval(() => {
+      const duration = player.duration;
+      const currentTime = player.currentTime;
+
+      if (duration > 0) {
+        onProgress(Math.min(currentTime / duration, 1));
+        if (!endedRef.current && currentTime >= duration - 0.15) {
+          endedRef.current = true;
+          onEnded();
+        }
+      }
+    }, 120);
+
+    return () => clearInterval(interval);
+  }, [onEnded, onProgress, paused, player, url]);
+
+  return (
+    <VideoView
+      player={player}
+      style={StyleSheet.absoluteFill}
+      contentFit="cover"
+      nativeControls={false}
+      fullscreenOptions={{ enabled: false }}
+    />
+  );
+}
 
 export default function StoryScreen() {
   const { id, userId: userIdParam, queue: queueParam } = useLocalSearchParams<{
@@ -70,11 +133,6 @@ export default function StoryScreen() {
   const mediaPayload =
     story && story.type !== "text" ? parseStoryMediaPayload(story.content) : null;
   const resolvedMediaUrl = mediaPayload ? getDisplayMediaUrl(mediaPayload.key, mediaPayload.url) : null;
-  const isVideoStory = story?.type === "video" && Boolean(resolvedMediaUrl);
-
-  const player = useVideoPlayer(isVideoStory ? resolvedMediaUrl! : "", (instance) => {
-    instance.loop = false;
-  });
 
   const progress = useRef(new Animated.Value(0)).current;
   const progressAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
@@ -94,15 +152,11 @@ export default function StoryScreen() {
 
   const pauseStory = () => {
     progressAnimationRef.current?.stop();
-    if (isVideoStory) {
-      player.pause();
-    }
   };
 
   const resumeStory = () => {
     if (!story || isReplyFocused) return;
     if (story.type === "video" && resolvedMediaUrl) {
-      player.play();
       return;
     }
     progressAnimationRef.current = Animated.timing(progress, {
@@ -138,6 +192,9 @@ export default function StoryScreen() {
     router.back();
   };
 
+  const advanceStoryRef = useRef(advanceStory);
+  advanceStoryRef.current = advanceStory;
+
   const goToPreviousStory = () => {
     if (!story || !ownerUserId) return;
     pauseStory();
@@ -171,9 +228,6 @@ export default function StoryScreen() {
     progress.setValue(0);
 
     if (story.type === "video" && resolvedMediaUrl) {
-      void player.replaceAsync(resolvedMediaUrl).then(() => {
-        player.play();
-      });
       return;
     }
 
@@ -193,6 +247,14 @@ export default function StoryScreen() {
     };
   }, [id, story?.type, resolvedMediaUrl]);
 
+  const handleVideoProgress = useCallback((ratio: number) => {
+    progress.setValue(ratio);
+  }, [progress]);
+
+  const handleVideoEnded = useCallback(() => {
+    advanceStoryRef.current();
+  }, []);
+
   useEffect(() => {
     if (isReplyFocused) {
       pauseStory();
@@ -200,25 +262,6 @@ export default function StoryScreen() {
       resumeStory();
     }
   }, [isReplyFocused]);
-
-  useEffect(() => {
-    if (!isVideoStory || isReplyFocused) return;
-
-    const interval = setInterval(() => {
-      const duration = player.duration;
-      const currentTime = player.currentTime;
-
-      if (duration > 0) {
-        progress.setValue(Math.min(currentTime / duration, 1));
-      }
-
-      if (duration > 0 && currentTime >= duration - 0.15) {
-        advanceStory();
-      }
-    }, 120);
-
-    return () => clearInterval(interval);
-  }, [isVideoStory, isReplyFocused, player, progress]);
 
   if (!story || !user) {
     if (isDeletingRef.current) {
@@ -259,10 +302,17 @@ export default function StoryScreen() {
 
   const handleReaction = async (emoji: string) => {
     const reaction = STORY_QUICK_REACTIONS.find((item) => item.emoji === emoji);
-    if (reaction) {
-      setReactionBurst(reaction.fluentName);
+    try {
+      await replyToStory(story.id, { emoji });
+      if (reaction) {
+        setReactionBurst(reaction.fluentName);
+      }
+    } catch (error) {
+      Alert.alert(
+        "Réaction impossible",
+        error instanceof Error ? error.message : "Impossible d'envoyer cette réaction.",
+      );
     }
-    await replyToStory(story.id, { emoji });
   };
 
   return (
@@ -273,12 +323,11 @@ export default function StoryScreen() {
         ) : story.type === "image" && resolvedMediaUrl ? (
           <Image source={{ uri: resolvedMediaUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
         ) : story.type === "video" && resolvedMediaUrl ? (
-          <VideoView
-            player={player}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            nativeControls={false}
-            fullscreenOptions={{ enabled: false }}
+          <StoryVideoPlayer
+            url={resolvedMediaUrl}
+            paused={isReplyFocused}
+            onProgress={handleVideoProgress}
+            onEnded={handleVideoEnded}
           />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "#111827" }]} />
@@ -385,7 +434,16 @@ export default function StoryScreen() {
             ownerName={user.name.split(" ")[0] ?? user.name}
             bottomInset={bottomPad}
             onFocusChange={setIsReplyFocused}
-            onSendText={(text) => replyToStory(story.id, { text })}
+            onSendText={async (text) => {
+              try {
+                await replyToStory(story.id, { text });
+              } catch (error) {
+                Alert.alert(
+                  "Réponse impossible",
+                  error instanceof Error ? error.message : "Impossible d'envoyer cette réponse.",
+                );
+              }
+            }}
             onSendReaction={handleReaction}
           />
         )}

@@ -2,6 +2,8 @@ import type { ImageSourcePropType } from "react-native";
 
 export type ChatWallpaperId =
   | "default"
+  | "doodle-light"
+  | "doodle-gold"
   | "slate"
   | "ocean"
   | "lavender"
@@ -26,6 +28,7 @@ export type ChatWallpaperSource =
       light: ImageSourcePropType;
       dark?: ImageSourcePropType;
       overlay?: string;
+      tile?: boolean;
     };
 
 export interface ChatWallpaperDefinition {
@@ -37,8 +40,30 @@ export interface ChatWallpaperDefinition {
 export const CHAT_WALLPAPERS: ChatWallpaperDefinition[] = [
   {
     id: "default",
-    label: "Par défaut",
-    source: { kind: "none" },
+    label: "Doodle",
+    source: {
+      kind: "image",
+      light: require("@/assets/images/wallpapers/chat-doodle.png"),
+      tile: true,
+    },
+  },
+  {
+    id: "doodle-light",
+    label: "Doodle clair",
+    source: {
+      kind: "image",
+      light: require("@/assets/images/wallpapers/doodle-light.png"),
+      tile: true,
+    },
+  },
+  {
+    id: "doodle-gold",
+    label: "Doodle or",
+    source: {
+      kind: "image",
+      light: require("@/assets/images/wallpapers/doodle-gold.png"),
+      tile: true,
+    },
   },
   {
     id: "slate",

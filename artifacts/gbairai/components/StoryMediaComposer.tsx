@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
   Modal,
   Platform,
   StatusBar,
@@ -47,13 +48,34 @@ export function StoryMediaComposer({
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const canPublish = Boolean(mediaUri) && !isPublishing;
   const previewUri = type === "video" ? previewThumbnailUri ?? mediaUri : mediaUri;
+  const captionBottomPadding = keyboardHeight > 0 ? keyboardHeight + 12 : bottomPad + 12;
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle="light-content" />
-      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
         {previewUri ? (
           <Image source={{ uri: previewUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
         ) : (
@@ -90,7 +112,7 @@ export function StoryMediaComposer({
 
         <LinearGradient
           colors={["transparent", "rgba(0,0,0,0.72)"]}
-          style={[styles.bottomGradient, { paddingBottom: bottomPad + 12 }]}
+          style={[styles.bottomGradient, { paddingBottom: captionBottomPadding }]}
         >
           {publishStatus ? (
             <View style={styles.uploadWrap}>

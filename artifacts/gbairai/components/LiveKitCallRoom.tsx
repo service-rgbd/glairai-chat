@@ -10,7 +10,7 @@ import {
 } from "@livekit/react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
@@ -157,7 +157,8 @@ function CallRoomBody({
   const facingModeRef = useRef<FacingMode>("user");
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(callType === "video");
-  const [speakerOn, setSpeakerOn] = useState(callType === "audio");
+  const [speakerOn, setSpeakerOn] = useState(callType === "video");
+  const [primaryView, setPrimaryView] = useState<"remote" | "local">("remote");
 
   const tracks = useTracks([...TRACK_SOURCES] as Parameters<typeof useTracks>[0], {
     onlySubscribed: false,
@@ -239,6 +240,33 @@ function CallRoomBody({
         : "Sonnerie...";
 
   const controlsBottom = Math.max(insets.bottom, 16) + 24;
+  const pipTop = insets.top + 72;
+  const hasRemoteVideo = remoteVideoTrack && isTrackReference(remoteVideoTrack);
+  const hasLocalVideo = localVideoTrack && isTrackReference(localVideoTrack);
+  const showVideoLayout = callType === "video" && (hasRemoteVideo || hasLocalVideo);
+
+  const primaryTrack =
+    primaryView === "remote"
+      ? hasRemoteVideo
+        ? remoteVideoTrack
+        : localVideoTrack
+      : hasLocalVideo
+        ? localVideoTrack
+        : remoteVideoTrack;
+
+  const pipTrack =
+    primaryView === "remote"
+      ? hasLocalVideo
+        ? localVideoTrack
+        : null
+      : hasRemoteVideo
+        ? remoteVideoTrack
+        : null;
+
+  const toggleVideoFocus = () => {
+    if (!hasRemoteVideo || !hasLocalVideo) return;
+    setPrimaryView((current) => (current === "remote" ? "local" : "remote"));
+  };
 
   return (
     <View style={styles.body}>
@@ -250,8 +278,10 @@ function CallRoomBody({
         onTokenRefreshed={onTokenRefreshed}
       />
 
-      {callType === "video" && remoteVideoTrack && isTrackReference(remoteVideoTrack) ? (
-        <VideoTrack trackRef={remoteVideoTrack} style={styles.remoteVideo} objectFit="cover" />
+      {showVideoLayout && primaryTrack && isTrackReference(primaryTrack) ? (
+        <Pressable style={styles.fullVideoTap} onPress={toggleVideoFocus}>
+          <VideoTrack trackRef={primaryTrack} style={styles.remoteVideo} objectFit="cover" />
+        </Pressable>
       ) : (
         <View style={styles.audioStage}>
           <Avatar
@@ -265,16 +295,21 @@ function CallRoomBody({
         </View>
       )}
 
-      {callType === "video" && localVideoTrack && isTrackReference(localVideoTrack) ? (
-        <View style={[styles.localPreview, { borderColor: colors.border, top: insets.top + 72 }]}>
-          <VideoTrack trackRef={localVideoTrack} style={styles.localVideo} objectFit="cover" />
-        </View>
+      {showVideoLayout && pipTrack && isTrackReference(pipTrack) ? (
+        <Pressable
+          style={[styles.localPreview, { borderColor: colors.border, top: pipTop }]}
+          onPress={toggleVideoFocus}
+        >
+          <VideoTrack trackRef={pipTrack} style={styles.localVideo} objectFit="cover" />
+        </Pressable>
       ) : null}
 
-      <View style={[styles.infoOverlay, { top: insets.top + 56 }]}>
-        <Text style={styles.name}>{otherUserName}</Text>
-        <Text style={styles.status}>{statusLabel}</Text>
-      </View>
+      {!showVideoLayout || remoteParticipants.length === 0 ? (
+        <View style={[styles.infoOverlay, { top: insets.top + 56 }]}>
+          <Text style={styles.name}>{otherUserName}</Text>
+          <Text style={styles.status}>{statusLabel}</Text>
+        </View>
+      ) : null}
 
       <View style={[styles.controls, { bottom: controlsBottom }]}>
         <TouchableOpacity
@@ -378,14 +413,27 @@ const styles = StyleSheet.create({
   remoteVideo: {
     ...StyleSheet.absoluteFillObject,
   },
+  fullVideoTap: {
+    ...StyleSheet.absoluteFillObject,
+  },
   localPreview: {
     position: "absolute",
     right: 16,
-    width: 108,
-    height: 148,
+    width: 112,
+    height: 156,
     borderRadius: 16,
     overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth,
+    zIndex: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOpacity: 0.28,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
+      },
+      android: { elevation: 8 },
+    }),
   },
   localVideo: {
     width: "100%",

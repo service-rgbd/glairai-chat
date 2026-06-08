@@ -242,6 +242,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } finally {
         setIsLoading(false);
+        if (__DEV__) {
+          console.log(
+            "[Gbairai] auth prête — session:",
+            storedToken ? "token stocké" : "anonyme",
+          );
+        }
       }
     };
     void load();
@@ -360,12 +366,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    const { resetContactsSyncState } = await import("@/lib/contacts-sync");
+    const { resetContactsSyncState, resetContactsPermissionState } = await import("@/lib/contacts-sync");
 
     // Déconnexion = fin de session uniquement. Le cache hors-ligne est conservé
     // pour un affichage immédiat à la reconnexion du même compte.
     await Promise.all([safeRemoveItem(USER_STORAGE_KEY), safeRemoveItem(TOKEN_STORAGE_KEY)]);
     resetContactsSyncState();
+    resetContactsPermissionState();
     setAuthTokenGetter(() => null);
     setAuthToken(null);
     setCurrentUser(null);
@@ -376,7 +383,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         currentUser,
         authToken,
-        isAuthenticated: !!authToken,
+        isAuthenticated: Boolean(authToken && currentUser && !isLoading),
         needsProfileSetup: !!currentUser && !currentUser.isOnboarded,
         isLoading,
         pendingPhone,

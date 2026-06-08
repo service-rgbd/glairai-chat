@@ -40,12 +40,18 @@ const pinnedPackages = [
   "@expo/metro-runtime",
 ];
 
+// @noble/* n'expose pas package.json dans "exports" — chemin direct via pnpm.
+const noblePackages = ["@noble/curves", "@noble/hashes", "@noble/ciphers"];
+
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
   ...Object.fromEntries(
     pinnedPackages
       .map((name) => [name, resolvePackageDir(name)])
       .filter((entry) => entry[1] != null),
+  ),
+  ...Object.fromEntries(
+    noblePackages.map((name) => [name, path.resolve(projectRoot, "node_modules", name)]),
   ),
 };
 
@@ -71,6 +77,17 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       filePath: voipPushStubPath,
       type: "sourceFile",
     };
+  }
+
+  if (moduleName.startsWith("@noble/")) {
+    try {
+      return {
+        filePath: require.resolve(moduleName, { paths: [projectRoot] }),
+        type: "sourceFile",
+      };
+    } catch {
+      // fall through
+    }
   }
 
   if (defaultResolveRequest) {

@@ -78,6 +78,8 @@ export default function ChatsScreen() {
   const [groupTitle, setGroupTitle] = useState("");
   const [composerContacts, setComposerContacts] = useState<ComposeContactOption[]>([]);
   const [composerLoading, setComposerLoading] = useState(false);
+  const getComposeContactsRef = useRef(getComposeContacts);
+  getComposeContactsRef.current = getComposeContacts;
   const { focusSearch } = useLocalSearchParams<{ focusSearch?: string }>();
   const shouldFocusSearch = focusSearch === "1";
 
@@ -397,7 +399,7 @@ export default function ChatsScreen() {
         if (composeContactsSnapshot.length > 0) {
           setComposerContacts(composeContactsSnapshot);
         }
-        const contacts = await getComposeContacts();
+        const contacts = await getComposeContactsRef.current();
         if (!cancelled) {
           setComposerContacts(contacts);
         }
@@ -412,7 +414,7 @@ export default function ChatsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [composerOpen, getComposeContacts]);
+  }, [composerOpen, composeContactsSnapshot]);
 
   const selectableUsers = useMemo(
     () =>
