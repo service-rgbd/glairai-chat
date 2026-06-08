@@ -2,7 +2,10 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { GChat, GMessage, GUser, formatTimestamp } from "@/contexts/ChatsContext";
+import type { GChat, GMessage, GStory, GUser } from "@/contexts/chats-types";
+import { formatTimestamp } from "@/lib/format-timestamp";
+import { getEmoji3dPayloadFromContent } from "@/lib/emoji-messages";
+import { getGroupDisplayColor, getGroupDisplayInitials } from "@/lib/group-utils";
 import { useColors } from "@/hooks/useColors";
 
 import { Avatar } from "./Avatar";
@@ -12,27 +15,61 @@ interface ChatItemProps {
   otherUser?: GUser;
   lastMessage?: GMessage;
   currentUserId: string;
+  users?: Record<string, GUser>;
+  typingLabel?: string | null;
+  userStories?: GStory[];
+  onStoryPress?: () => void;
   onPress: () => void;
 }
 
-export function ChatItem({ chat, otherUser, lastMessage, currentUserId, onPress }: ChatItemProps) {
+export function ChatItem({
+  chat,
+  otherUser,
+  lastMessage,
+  currentUserId,
+  users = {},
+  typingLabel,
+  userStories = [],
+  onStoryPress,
+  onPress,
+}: ChatItemProps) {
   const colors = useColors();
   const isGroup = chat.type === "group";
   const displayName = isGroup ? (chat.name ?? "Groupe") : (otherUser?.name ?? "");
   const isOnline = otherUser?.lastSeen === null;
-  const initials = isGroup ? "GR" : (otherUser?.initials ?? "??");
-  const color = otherUser?.color ?? colors.primary;
+  const initials = isGroup
+    ? getGroupDisplayInitials(chat, users, currentUserId)
+    : (otherUser?.initials ?? "??");
+  const color = isGroup ? getGroupDisplayColor(chat.id) : (otherUser?.color ?? colors.primary);
+  const avatarUri = isGroup ? (chat.avatarUrl ?? null) : (otherUser?.avatar ?? null);
   const hasUnread = chat.unreadCount > 0;
+  const hasStory = !isGroup && userStories.length > 0;
+  const hasUnseenStory = hasStory && userStories.some((story) => !story.viewerIds.includes(currentUserId));
+  const avatarSize = 62;
+  const ringPadding = 3;
+  const ringSize = avatarSize + ringPadding * 2;
 
   const getPreview = () => {
+    if (typingLabel) return typingLabel;
     if (!lastMessage) return "Démarrer une conversation";
     const prefix = lastMessage.senderId === currentUserId ? "Vous: " : (isGroup ? `${users[lastMessage.senderId]?.name?.split(" ")[0] ?? ""}: ` : "");
-    return prefix + lastMessage.content;
+    const textPreview =
+      lastMessage.type === "text"
+        ? (getEmoji3dPayloadFromContent(lastMessage.content)?.emoji ?? lastMessage.content)
+        : lastMessage.content;
+    const preview =
+      lastMessage.type === "audio"
+        ? "Note vocale"
+        : lastMessage.type === "video"
+          ? "Vidéo"
+          : lastMessage.type === "image"
+            ? "Photo"
+            : textPreview;
+    return prefix + preview;
   };
 
-  const users: Record<string, GUser> = {};
-
   const statusIcon = () => {
+    if (typingLabel) return null;
     if (!lastMessage || lastMessage.senderId !== currentUserId) return null;
     const iconProps = { size: 14, style: { marginRight: 2 } };
     if (lastMessage.status === "read") return <Ionicons name="checkmark-done" {...iconProps} color={colors.accent} />;
@@ -42,17 +79,42 @@ export function ChatItem({ chat, otherUser, lastMessage, currentUserId, onPress 
 
   return (
     <TouchableOpacity style={[styles.container, { borderBottomColor: colors.border }]} onPress={onPress} activeOpacity={0.7}>
-      <Avatar
-        uri={otherUser?.avatar}
-        initials={initials}
-        color={color}
-        size={54}
-        showOnline={!isGroup}
-        isOnline={isOnline}
-      />
+      {hasStory ? (
+        <TouchableOpacity
+          onPress={() => onStoryPress?.()}
+          activeOpacity={0.85}
+          style={[
+            styles.storyRing,
+            {
+              width: ringSize,
+              height: ringSize,
+              borderRadius: ringSize / 2,
+              borderColor: hasUnseenStory ? colors.primary : colors.border,
+            },
+          ]}
+        >
+          <Avatar
+            uri={avatarUri}
+            initials={initials}
+            color={color}
+            size={avatarSize}
+            showOnline
+            isOnline={isOnline}
+          />
+        </TouchableOpacity>
+      ) : (
+        <Avatar
+          uri={avatarUri}
+          initials={initials}
+          color={color}
+          size={avatarSize}
+          showOnline={!isGroup}
+          isOnline={isOnline}
+        />
+      )}
       <View style={styles.content}>
         <View style={styles.topRow}>
-          <Text style={[styles.name, { color: colors.text }, hasUnread && styles.nameBold]} numberOfLines={1}>
+          <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
             {displayName}
           </Text>
           <Text style={[styles.time, { color: hasUnread ? colors.primary : colors.mutedForeground }]}>
@@ -63,7 +125,11 @@ export function ChatItem({ chat, otherUser, lastMessage, currentUserId, onPress 
           <View style={styles.previewRow}>
             {statusIcon()}
             <Text
-              style={[styles.preview, { color: hasUnread ? colors.text : colors.mutedForeground }, hasUnread && styles.previewBold]}
+              style={[
+                styles.preview,
+                { color: typingLabel ? colors.primary : hasUnread ? colors.text : colors.mutedForeground },
+                (hasUnread || typingLabel) && styles.previewBold,
+              ]}
               numberOfLines={1}
             >
               {getPreview()}
@@ -84,10 +150,16 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    gap: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 84,
+  },
+  storyRing: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2.5,
   },
   content: {
     flex: 1,
@@ -110,20 +182,17 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   name: {
-    fontSize: 15.5,
-    fontFamily: "Inter_400Regular",
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
     flex: 1,
     marginRight: 8,
   },
-  nameBold: {
-    fontFamily: "Inter_600SemiBold",
-  },
   time: {
-    fontSize: 12,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
   },
   preview: {
-    fontSize: 13.5,
+    fontSize: 16,
     flex: 1,
   },
   previewBold: {

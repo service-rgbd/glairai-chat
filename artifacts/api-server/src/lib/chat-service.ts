@@ -3507,15 +3507,9 @@ class DatabaseChatService implements ChatService {
       return true;
     }
 
-    if (await this.hasRegisteredContact(viewerUserId, ownerUserId)) {
-      return true;
-    }
-
-    const directConversationId = await this.findExistingDirectConversation([
-      viewerUserId,
-      ownerUserId,
-    ]);
-    return Boolean(directConversationId);
+    const viewerHasOwner = await this.hasRegisteredContact(viewerUserId, ownerUserId);
+    const ownerHasViewer = await this.hasRegisteredContact(ownerUserId, viewerUserId);
+    return viewerHasOwner && ownerHasViewer;
   }
 
   private async ensureContactFromStoryReply(ownerUserId: string, viewerUserId: string) {
