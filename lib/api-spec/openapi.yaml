@@ -1156,6 +1156,8 @@ components:
           type: string
         deviceName:
           type: string
+        voipPushToken:
+          type: string
       required:
         - pushToken
         - platform

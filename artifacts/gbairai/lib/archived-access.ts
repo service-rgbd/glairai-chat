@@ -1,9 +1,14 @@
 import { safeGetItem, safeRemoveItem, safeSetItem } from "@/lib/safe-storage";
 
 const STORAGE_PREFIX = "gbairai:archived-access:";
+const STRIP_PINNED_PREFIX = "gbairai:archived-strip-pinned:";
 
 function storageKey(userId: string) {
   return `${STORAGE_PREFIX}${userId}`;
+}
+
+function stripPinnedKey(userId: string) {
+  return `${STRIP_PINNED_PREFIX}${userId}`;
 }
 
 function hashPassword(password: string, salt: string) {
@@ -46,4 +51,26 @@ export async function verifyArchivedAccessPassword(userId: string, password: str
 
 export async function clearArchivedAccessPassword(userId: string) {
   await safeRemoveItem(storageKey(userId));
+}
+
+export async function isArchivedStripPinned(userId: string) {
+  return (await safeGetItem(stripPinnedKey(userId))) === "1";
+}
+
+export async function setArchivedStripPinned(userId: string, pinned: boolean) {
+  if (pinned) {
+    await safeSetItem(stripPinnedKey(userId), "1");
+    return;
+  }
+  await safeRemoveItem(stripPinnedKey(userId));
+}
+
+/** @deprecated Utiliser isArchivedStripPinned */
+export async function isArchivedStripRevealed(userId: string) {
+  return isArchivedStripPinned(userId);
+}
+
+/** @deprecated Utiliser setArchivedStripPinned */
+export async function setArchivedStripRevealed(userId: string, revealed: boolean) {
+  await setArchivedStripPinned(userId, revealed);
 }

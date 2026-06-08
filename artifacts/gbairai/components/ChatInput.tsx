@@ -325,7 +325,7 @@ export function ChatInput({
 
   return (
     <>
-      <View style={[styles.container, { borderTopColor: colors.border, backgroundColor: colors.background, paddingBottom: bottomInset + 8 }]}>
+      <View style={[styles.container, { paddingBottom: bottomInset + 10 }]}>
         {uploadStatus ? (
           <View style={styles.uploadBannerWrap}>
             <UploadProgressBanner status={uploadStatus} />
@@ -333,7 +333,7 @@ export function ChatInput({
         ) : null}
         <View style={styles.inputRow}>
           <TouchableOpacity
-            style={styles.iconBtn}
+            style={[styles.circleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
             activeOpacity={0.7}
             onPress={() => {
               void pickAttachment();
@@ -341,12 +341,12 @@ export function ChatInput({
             disabled={isUploading || isPreparingPreview}
           >
             {isPreparingPreview ? (
-              <ActivityIndicator size="small" color={colors.mutedForeground} />
+              <ActivityIndicator size="small" color={colors.text} />
             ) : (
-              <Feather name="paperclip" size={22} color={colors.mutedForeground} />
+              <Feather name="paperclip" size={20} color={colors.text} />
             )}
           </TouchableOpacity>
-          <View style={[styles.inputWrap, { backgroundColor: colors.input, borderColor: colors.border }]}>
+          <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {recorderState.isRecording ? (
               <View style={styles.recordingBlock}>
                 <View style={styles.recordingRow}>
@@ -367,17 +367,9 @@ export function ChatInput({
             ) : (
             <View style={styles.idleBlock}>
               <View style={styles.textRow}>
-                <TouchableOpacity
-                  style={styles.emojiBtn}
-                  onPress={() => setEmojiPickerOpen(true)}
-                  disabled={isUploading}
-                  activeOpacity={0.75}
-                >
-                  <Feather name="smile" size={22} color={colors.mutedForeground} />
-                </TouchableOpacity>
                 <TextInput
                   style={[styles.input, { color: colors.text }]}
-                  placeholder="Message..."
+                  placeholder="Message"
                   placeholderTextColor={colors.mutedForeground}
                   value={text}
                   onChangeText={(value) => {
@@ -389,6 +381,14 @@ export function ChatInput({
                   returnKeyType="default"
                   editable={!isUploading}
                 />
+                <TouchableOpacity
+                  style={styles.emojiBtn}
+                  onPress={() => setEmojiPickerOpen(true)}
+                  disabled={isUploading}
+                  activeOpacity={0.75}
+                >
+                  <Ionicons name="happy-outline" size={22} color={colors.mutedForeground} />
+                </TouchableOpacity>
               </View>
                 {isPreparingPreview ? (
                   <Text style={[styles.helperText, { color: colors.mutedForeground }]}>
@@ -432,21 +432,23 @@ export function ChatInput({
           {text.trim().length > 0 ? (
             <TouchableOpacity
               style={[
-                styles.sendBtn,
-                { backgroundColor: colors.primary, opacity: isSendingText ? 0.7 : 1 },
+                styles.circleBtn,
+                { backgroundColor: colors.card, borderColor: colors.border, opacity: isSendingText ? 0.7 : 1 },
               ]}
               onPress={handleSend}
               activeOpacity={0.85}
               disabled={isSendingText || isUploading}
             >
-              <Ionicons name="send" size={18} color="#fff" style={{ marginLeft: 2 }} />
+              <Ionicons name="send" size={18} color={colors.primary} style={{ marginLeft: 2 }} />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               style={[
-                styles.sendBtn,
+                styles.circleBtn,
+                recorderState.isRecording && styles.circleBtnRecording,
                 {
-                  backgroundColor: recorderState.isRecording ? colors.destructive : colors.primary,
+                  backgroundColor: colors.card,
+                  borderColor: recorderState.isRecording ? colors.destructive : colors.border,
                   opacity: isUploading ? 0.7 : 1,
                 },
               ]}
@@ -456,7 +458,11 @@ export function ChatInput({
               }}
               disabled={isUploading}
             >
-              <Feather name={recorderState.isRecording ? "stop-circle" : "mic"} size={20} color="#fff" />
+              <Feather
+                name={recorderState.isRecording ? "stop-circle" : "mic"}
+                size={20}
+                color={recorderState.isRecording ? colors.destructive : colors.text}
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -656,10 +662,10 @@ export function ChatInput({
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingTop: 6,
     gap: 8,
+    backgroundColor: "transparent",
   },
   uploadBannerWrap: {
     width: "100%",
@@ -667,31 +673,45 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 6,
+    gap: 8,
   },
-  iconBtn: {
-    width: 42,
-    height: 42,
+  circleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
+  circleBtnRecording: {},
   inputWrap: {
     flex: 1,
-    borderRadius: 22,
+    borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
-    paddingVertical: Platform.OS === "ios" ? 10 : 6,
-    minHeight: 42,
+    paddingHorizontal: 16,
+    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+    minHeight: 44,
     maxHeight: 120,
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
   input: {
     flex: 1,
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: "Inter_400Regular",
-    lineHeight: 24,
+    lineHeight: 22,
     maxHeight: 100,
+    paddingVertical: 0,
   },
   recordingRow: {
     minHeight: 24,
@@ -708,14 +728,14 @@ const styles = StyleSheet.create({
   textRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 6,
+    gap: 4,
   },
   emojiBtn: {
     width: 28,
     height: 28,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 2,
+    marginBottom: 1,
   },
   recordingDot: {
     width: 10,
@@ -747,14 +767,6 @@ const styles = StyleSheet.create({
   retryText: {
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
-  },
-  sendBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 2,
   },
   previewRoot: {
     flex: 1,

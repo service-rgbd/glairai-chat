@@ -1,22 +1,23 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
-import * as ImagePicker from "expo-image-picker";
 import React, { useEffect, useState } from "react";
 import {
-  Modal,
+  Alert,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
-import { UploadProgressBanner } from "@/components/UploadProgressBanner";
+import { StoryMediaComposer } from "@/components/StoryMediaComposer";
+import { StoryMediaPickerModal } from "@/components/StoryMediaPickerModal";
+import { StoryTextComposer } from "@/components/StoryTextComposer";
 import { useAuth } from "@/contexts/AuthContext";
 import type { GStory, GUser, StoryComposerDraft } from "@/contexts/chats-types";
 import { formatTimestamp } from "@/lib/format-timestamp";
@@ -37,6 +38,8 @@ export default function StatusScreen() {
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
   const currentUserId = currentUser?.id ?? "me";
   const [composerOpen, setComposerOpen] = useState(false);
+  const [textComposerOpen, setTextComposerOpen] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishStatus, setPublishStatus] = useState<UploadStatus | null>(null);
   const [draft, setDraft] = useState<StoryComposerDraft>({
@@ -44,12 +47,12 @@ export default function StatusScreen() {
     text: "",
     mediaUri: null,
     mimeType: null,
-    backgroundColor: "#6D4AFF",
+    backgroundColor: "#F4435D",
   });
 
   useEffect(() => {
     if (compose === "1") {
-      setComposerOpen(true);
+      setMediaPickerOpen(true);
     }
   }, [compose]);
 
@@ -79,7 +82,7 @@ export default function StatusScreen() {
 
   const openStoryForUser = (targetUserId: string, storyList: GStory[]) => {
     if (!storyList.length) {
-      setComposerOpen(true);
+      setMediaPickerOpen(true);
       return;
     }
     openUserStories({
@@ -91,57 +94,68 @@ export default function StatusScreen() {
     });
   };
 
-  const pickStoryMedia = async (mediaType: "image" | "video") => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: mediaType === "image" ? ["images"] : ["videos"],
-      allowsEditing: mediaType === "image",
-      quality: 0.8,
-    });
-
-    if (result.canceled) {
-      return;
-    }
-
-    const asset = result.assets[0];
-    if (!asset?.uri) return;
-
-    if (mediaType === "video") {
+  const applySelectedMedia = async (payload: {
+    uri: string;
+    mediaType: "image" | "video";
+    mimeType: string | null;
+  }) => {
+    if (payload.mediaType === "video") {
       try {
-        const previewThumbnailUri = await generateVideoThumbnailUri(asset.uri);
-        setDraft((current) => ({
-          ...current,
-          type: mediaType,
-          mediaUri: asset.uri,
-          mimeType: asset.mimeType ?? "video/mp4",
+        const previewThumbnailUri = await generateVideoThumbnailUri(payload.uri);
+        setDraft({
+          type: "video",
+          text: "",
+          mediaUri: payload.uri,
+          mimeType: payload.mimeType ?? "video/mp4",
           backgroundColor: "#0F172A",
           previewThumbnailUri,
-        }));
+        });
       } catch {
-        setDraft((current) => ({
-          ...current,
-          type: mediaType,
-          mediaUri: asset.uri,
-          mimeType: asset.mimeType ?? "video/mp4",
+        setDraft({
+          type: "video",
+          text: "",
+          mediaUri: payload.uri,
+          mimeType: payload.mimeType ?? "video/mp4",
           backgroundColor: "#0F172A",
           previewThumbnailUri: null,
-        }));
+        });
       }
-      return;
+    } else {
+      setDraft({
+        type: "image",
+        text: "",
+        mediaUri: payload.uri,
+        mimeType: payload.mimeType ?? "image/jpeg",
+        backgroundColor: "#0F172A",
+        previewThumbnailUri: null,
+      });
     }
+    setMediaPickerOpen(false);
+    setComposerOpen(true);
+  };
 
+  const openTextComposer = () => {
+    resetDraft();
+    setMediaPickerOpen(false);
+    setTextComposerOpen(true);
+  };
+
+  const openMediaPickerForType = (type: "image" | "video") => {
+    setTextComposerOpen(false);
+    setComposerOpen(false);
     setDraft((current) => ({
       ...current,
-      type: mediaType,
-      mediaUri: asset.uri,
-      mimeType: asset.mimeType ?? "image/jpeg",
-      backgroundColor: "#0F172A",
+      type,
+      text: "",
+      mediaUri: null,
+      mimeType: null,
       previewThumbnailUri: null,
     }));
+    setMediaPickerOpen(true);
+  };
+
+  const handleVoiceStatus = () => {
+    Alert.alert("Statut vocal", "Cette fonctionnalité arrive bientôt.");
   };
 
   const resetDraft = () => {
@@ -150,18 +164,17 @@ export default function StatusScreen() {
       text: "",
       mediaUri: null,
       mimeType: null,
-      backgroundColor: "#6D4AFF",
+      backgroundColor: "#F4435D",
       previewThumbnailUri: null,
     });
   };
 
   const canPublish =
-    !isPublishing &&
-    ((draft.type === "text" && draft.text.trim().length > 0) ||
-      (draft.type !== "text" && Boolean(draft.mediaUri)));
+    !isPublishing && draft.type !== "text" && Boolean(draft.mediaUri);
 
   const publishStory = async () => {
     if (!canPublish) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsPublishing(true);
     try {
       await createStory(draft, setPublishStatus);
@@ -171,6 +184,39 @@ export default function StatusScreen() {
       setIsPublishing(false);
       setPublishStatus(null);
     }
+  };
+
+  const publishTextStory = async (payload: { text: string; backgroundColor: string }) => {
+    if (isPublishing) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsPublishing(true);
+    try {
+      await createStory(
+        {
+          type: "text",
+          text: payload.text,
+          mediaUri: null,
+          mimeType: null,
+          backgroundColor: payload.backgroundColor,
+        },
+        setPublishStatus,
+      );
+      resetDraft();
+      setTextComposerOpen(false);
+    } finally {
+      setIsPublishing(false);
+      setPublishStatus(null);
+    }
+  };
+
+  const closeTextComposer = () => {
+    setTextComposerOpen(false);
+    resetDraft();
+  };
+
+  const closeComposer = () => {
+    setComposerOpen(false);
+    resetDraft();
   };
 
   const StoryCard = ({
@@ -204,7 +250,7 @@ export default function StatusScreen() {
             openStoryForUser(user.id, storyList);
             return;
           }
-          setComposerOpen(true);
+          setMediaPickerOpen(true);
         }}
         activeOpacity={0.82}
       >
@@ -301,134 +347,44 @@ export default function StatusScreen() {
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary, bottom: bottomPad + 78 }]}
         activeOpacity={0.85}
-        onPress={() => setComposerOpen(true)}
+        onPress={() => setMediaPickerOpen(true)}
         accessibilityLabel="Créer un statut"
       >
         <Ionicons name="add" size={30} color="#fff" />
       </TouchableOpacity>
 
-      <Modal visible={composerOpen} animationType="slide" onRequestClose={() => setComposerOpen(false)}>
-        <View style={[styles.modalRoot, { backgroundColor: colors.background, paddingTop: topPad + 12 }]}>
-          <View style={styles.modalHeader}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Créer un statut</Text>
-            <TouchableOpacity
-              onPress={() => {
-                setComposerOpen(false);
-                resetDraft();
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.modalAction, { color: colors.primary }]}>Fermer</Text>
-            </TouchableOpacity>
-          </View>
+      <StoryMediaPickerModal
+        visible={mediaPickerOpen}
+        onClose={() => setMediaPickerOpen(false)}
+        onSelectText={openTextComposer}
+        onSelectAsset={(payload) => {
+          void applySelectedMedia(payload);
+        }}
+      />
 
-          <View style={styles.mediaButtons}>
-            <TouchableOpacity
-              style={[styles.typeChip, { backgroundColor: draft.type === "text" ? colors.primary : colors.card, borderColor: draft.type === "text" ? colors.primary : colors.border }]}
-              onPress={() =>
-                setDraft((current) => ({
-                  ...current,
-                  type: "text",
-                  mediaUri: null,
-                  mimeType: null,
-                  backgroundColor: "#6D4AFF",
-                  previewThumbnailUri: null,
-                }))
-              }
-              activeOpacity={0.8}
-            >
-              <Feather name="type" size={17} color={draft.type === "text" ? "#fff" : colors.primary} />
-              <Text style={[styles.typeChipText, { color: draft.type === "text" ? "#fff" : colors.text }]}>Texte</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.typeChip, { backgroundColor: draft.type === "image" ? colors.primary : colors.card, borderColor: draft.type === "image" ? colors.primary : colors.border }]}
-              onPress={() => {
-                void pickStoryMedia("image");
-              }}
-              activeOpacity={0.8}
-            >
-              <Feather name="image" size={18} color={draft.type === "image" ? "#fff" : colors.primary} />
-              <Text style={[styles.typeChipText, { color: draft.type === "image" ? "#fff" : colors.text }]}>Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.typeChip, { backgroundColor: draft.type === "video" ? colors.primary : colors.card, borderColor: draft.type === "video" ? colors.primary : colors.border }]}
-              onPress={() => {
-                void pickStoryMedia("video");
-              }}
-              activeOpacity={0.8}
-            >
-              <Feather name="video" size={18} color={draft.type === "video" ? "#fff" : colors.primary} />
-              <Text style={[styles.typeChipText, { color: draft.type === "video" ? "#fff" : colors.text }]}>Vidéo</Text>
-            </TouchableOpacity>
-          </View>
+      <StoryTextComposer
+        visible={textComposerOpen}
+        isPublishing={isPublishing}
+        initialBackgroundColor={draft.backgroundColor}
+        onClose={closeTextComposer}
+        onPublish={publishTextStory}
+        onSelectPhoto={() => openMediaPickerForType("image")}
+        onSelectVideo={() => openMediaPickerForType("video")}
+        onSelectVoice={handleVoiceStatus}
+      />
 
-          {draft.mediaUri ? (
-            <View style={[styles.previewCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              {draft.type === "image" ? (
-                <Image source={{ uri: draft.mediaUri }} style={styles.previewMedia} contentFit="cover" />
-              ) : (
-                <View style={styles.videoPreview}>
-                  {draft.previewThumbnailUri ? (
-                    <Image source={{ uri: draft.previewThumbnailUri }} style={styles.previewMedia} contentFit="cover" />
-                  ) : (
-                    <View style={[styles.videoPreviewFallback, { backgroundColor: colors.background }]}>
-                      <Ionicons name="videocam" size={42} color={colors.mutedForeground} />
-                    </View>
-                  )}
-                  <View style={styles.videoPreviewOverlay}>
-                    <Ionicons name="play-circle" size={52} color="#fff" />
-                    <Text style={styles.videoPreviewOverlayText}>Aperçu vidéo</Text>
-                  </View>
-                </View>
-              )}
-              <TouchableOpacity
-                style={[styles.removeMediaBtn, { backgroundColor: colors.background }]}
-                onPress={() =>
-                  setDraft((current) => ({
-                    ...current,
-                    type: "text",
-                    mediaUri: null,
-                    mimeType: null,
-                    backgroundColor: "#6D4AFF",
-                    previewThumbnailUri: null,
-                  }))
-                }
-                activeOpacity={0.8}
-              >
-                <Ionicons name="close" size={18} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          <TextInput
-            style={[styles.statusInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-            placeholder={
-              draft.type === "text"
-                ? "Que voulez-vous partager ?"
-                : "Ajouter une légende (optionnel)"
-            }
-            placeholderTextColor={colors.mutedForeground}
-            multiline
-            value={draft.text}
-            onChangeText={(value) => setDraft((current) => ({ ...current, text: value }))}
-          />
-
-          {publishStatus ? <UploadProgressBanner status={publishStatus} /> : null}
-
-          <TouchableOpacity
-            style={[styles.publishBtn, { backgroundColor: canPublish ? colors.primary : colors.muted }]}
-            onPress={() => {
-              void publishStory();
-            }}
-            disabled={!canPublish}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.publishBtnText, { color: canPublish ? "#fff" : colors.mutedForeground }]}>
-              {isPublishing ? "Publication..." : "Publier le statut"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      <StoryMediaComposer
+        visible={composerOpen && Boolean(draft.mediaUri) && draft.type !== "text"}
+        type={draft.type === "video" ? "video" : "image"}
+        mediaUri={draft.mediaUri ?? ""}
+        previewThumbnailUri={draft.previewThumbnailUri}
+        caption={draft.text}
+        isPublishing={isPublishing}
+        publishStatus={publishStatus}
+        onClose={closeComposer}
+        onCaptionChange={(value) => setDraft((current) => ({ ...current, text: value }))}
+        onPublish={() => void publishStory()}
+      />
     </View>
   );
 }
@@ -555,96 +511,6 @@ const styles = StyleSheet.create({
   storyInfo: { flex: 1 },
   storyName: { fontSize: 15.5, fontFamily: "Inter_500Medium" },
   storyTime: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
-  modalRoot: { flex: 1, paddingHorizontal: 20, gap: 16 },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  modalTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
-  modalAction: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
-  statusInput: {
-    minHeight: 140,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 18,
-    fontFamily: "Inter_400Regular",
-    textAlignVertical: "top",
-  },
-  publishBtn: {
-    height: 54,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  publishBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
-  mediaButtons: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  typeChip: {
-    flex: 1,
-    height: 50,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 8,
-  },
-  typeChipText: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
-  previewCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    padding: 10,
-    position: "relative",
-  },
-  previewMedia: {
-    width: "100%",
-    height: 240,
-    borderRadius: 14,
-  },
-  videoPreview: {
-    width: "100%",
-    height: 240,
-    borderRadius: 14,
-    overflow: "hidden",
-    position: "relative",
-  },
-  videoPreviewFallback: {
-    width: "100%",
-    height: 240,
-    borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  videoPreviewOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.28)",
-    gap: 8,
-  },
-  videoPreviewOverlayText: {
-    color: "#fff",
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-  },
-  removeMediaBtn: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-  },
   fab: {
     position: "absolute",
     right: 20,

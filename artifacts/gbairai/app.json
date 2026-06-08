@@ -18,9 +18,9 @@
       "infoPlist": {
         "NSContactsUsageDescription": "Gbairai utilise vos contacts pour trouver les personnes déjà inscrites dans l'application.",
         "NSUserNotificationsUsageDescription": "Gbairai utilise les notifications pour vous prévenir des nouveaux messages.",
-        "NSPhotoLibraryUsageDescription": "Gbairai utilise votre photothèque pour choisir une photo de profil.",
+        "NSPhotoLibraryUsageDescription": "Gbairai utilise votre photothèque pour choisir une photo de profil et publier des statuts.",
         "NSPhotoLibraryAddUsageDescription": "Gbairai peut enregistrer les photos et vidéos reçues dans votre galerie.",
-        "NSCameraUsageDescription": "Gbairai utilise la caméra pour vos appels vidéo.",
+        "NSCameraUsageDescription": "Gbairai utilise la caméra pour vos appels vidéo et vos statuts.",
         "NSMicrophoneUsageDescription": "Gbairai utilise le microphone pour vos appels audio et vidéo.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
@@ -49,7 +49,9 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH"
+        "android.permission.BLUETOOTH",
+        "android.permission.READ_PHONE_NUMBERS",
+        "android.permission.CALL_PHONE"
       ]
     },
     "web": {
@@ -71,6 +73,8 @@
         }
       ],
       "@config-plugins/react-native-webrtc",
+      "@config-plugins/react-native-callkeep",
+      "./plugins/with-voip-push.js",
       "expo-dev-client",
       [
         "expo-notifications",
@@ -79,7 +83,15 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Gbairai utilise votre photothèque pour choisir une photo de profil et publier des statuts.",
+          "savePhotosPermission": "Gbairai peut enregistrer les photos et vidéos reçues dans votre galerie.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

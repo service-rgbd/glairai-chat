@@ -63,7 +63,7 @@ interface AuthContextType {
   setPendingPhone: (phone: string, countryCode?: string, callingCode?: string) => void;
   setupProfile: (name: string, avatar: string | null, bio?: string) => Promise<void>;
   updateProfile: (updates: Partial<AuthUser>) => Promise<void>;
-  registerPushDevice: (pushToken: string, deviceName: string) => Promise<void>;
+  registerPushDevice: (pushToken: string, deviceName: string, voipPushToken?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -345,12 +345,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await safeSetItem(USER_STORAGE_KEY, JSON.stringify(mapped));
   };
 
-  const registerPushDevice = async (pushToken: string, deviceName: string) => {
+  const registerPushDevice = async (
+    pushToken: string,
+    deviceName: string,
+    voipPushToken?: string,
+  ) => {
     if (!authToken) return;
     await registerDeviceToken({
       pushToken,
       deviceName,
       platform: "expo",
+      ...(voipPushToken ? { voipPushToken } : {}),
     });
   };
 

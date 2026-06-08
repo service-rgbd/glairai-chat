@@ -50,6 +50,7 @@ import {
 } from "@/lib/contacts-sync";
 import { UserCacheKeys, migrateLegacyUserCache } from "@/lib/offline-cache";
 import { setIncomingCall, clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
+import { shouldAcceptIncomingCall } from "@/lib/call-session-client";
 import { fetchPendingIncomingCall } from "@/lib/calls";
 import { emitCallSignal } from "@/lib/call-signaling";
 import { countUnreadMissedCalls } from "@/lib/call-badge";
@@ -1049,7 +1050,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         !event.callerUserId ||
         !event.callType ||
         !event.callId ||
-        event.callerUserId === currentUser?.id
+        event.callerUserId === currentUser?.id ||
+        !shouldAcceptIncomingCall(event.callId)
       ) {
         return;
       }
@@ -1077,11 +1079,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       });
 
       const outcome =
-        type === "missed" || type === "cancelled"
+        type === "missed"
           ? ("missed" as const)
-          : type === "declined"
-            ? ("declined" as const)
-            : ("completed" as const);
+          : type === "cancelled"
+            ? ("cancelled" as const)
+            : type === "declined"
+              ? ("declined" as const)
+              : ("completed" as const);
 
       const refreshConversation = () => {
         void queryClient.invalidateQueries({ queryKey: ["messages", event.conversationId] });
@@ -1228,9 +1232,18 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     const registerPush = async () => {
       const { registerForPushNotificationsAsync } = await import("@/lib/notifications");
       const pushToken = await registerForPushNotificationsAsync();
-      if (pushToken) {
-        await registerPushDevice(pushToken, "Expo device");
-      }
+
+      const registerDevice = async (voipPushToken?: string) => {
+        if (!pushToken) return;
+        await registerPushDevice(pushToken, "Expo device", voipPushToken);
+      };
+
+      const { setupVoipPushRegistration } = await import("@/lib/voip-push");
+      setupVoipPushRegistration((voipToken) => {
+        void registerDevice(voipToken);
+      });
+
+      await registerDevice();
     };
 
     void registerPush();
@@ -1245,6 +1258,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       try {
         const pending = await fetchPendingIncomingCall(authToken);
         if (cancelled || !pending || pending.callerUserId === currentUser.id) return;
+        if (!shouldAcceptIncomingCall(pending.callId)) return;
 
         const existing = getIncomingCall();
         if (existing?.callId === pending.callId) return;

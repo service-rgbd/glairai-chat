@@ -1,39 +1,66 @@
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { Image, type ImageSource } from "expo-image";
 import React, { useMemo } from "react";
 import {
   Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useColorScheme,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useChats } from "@/contexts/chats-context-ref";
+import { useColors } from "@/hooks/useColors";
 import { openGlobalSearch } from "@/lib/navigation";
 
 const ACTIVE = "#3390EC";
-const INACTIVE = "#FFFFFF";
 const BADGE_RED = "#FF3B30";
 
-const VISIBLE_TABS = ["contacts", "calls", "index", "status", "settings"] as const;
+const VISIBLE_TABS = ["calls", "index", "status", "settings"] as const;
 
-type TabMeta = {
-  activeIcon: keyof typeof Ionicons.glyphMap;
-  inactiveIcon: keyof typeof Ionicons.glyphMap;
+const TAB_ICONS: Record<string, ImageSource> = {
+  calls: require("@/assets/images/nav/calls.png"),
+  index: require("@/assets/images/nav/chats.png"),
+  status: require("@/assets/images/nav/status.png"),
+  settings: require("@/assets/images/nav/settings.png"),
 };
 
-const TAB_META: Record<string, TabMeta> = {
-  contacts: { activeIcon: "person-circle", inactiveIcon: "person-circle-outline" },
-  calls: { activeIcon: "call", inactiveIcon: "call-outline" },
-  index: { activeIcon: "chatbubbles", inactiveIcon: "chatbubbles-outline" },
-  status: { activeIcon: "albums", inactiveIcon: "albums-outline" },
-  settings: { activeIcon: "settings", inactiveIcon: "settings-outline" },
-};
+function GlassSurface({
+  children,
+  style,
+  isDark,
+}: {
+  children: React.ReactNode;
+  style?: object;
+  isDark: boolean;
+}) {
+  const overlay = isDark ? "rgba(22, 22, 24, 0.42)" : "rgba(255, 255, 255, 0.58)";
+  const borderColor = isDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.10)";
+
+  return (
+    <View style={[styles.glassShell, style, { borderColor }]}>
+      {Platform.OS === "ios" ? (
+        <BlurView
+          intensity={isDark ? 34 : 52}
+          tint={isDark ? "dark" : "light"}
+          style={StyleSheet.absoluteFill}
+        />
+      ) : null}
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: overlay }]} />
+      <View style={styles.glassContent}>{children}</View>
+    </View>
+  );
+}
 
 export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const scheme = useColorScheme();
+  const isDark = scheme === "dark";
   const { chats, missedCallsUnreadCount } = useChats();
 
   const unreadTotal = useMemo(
@@ -46,11 +73,8 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
     (route): route is (typeof state.routes)[number] => Boolean(route),
   );
 
-  const pillBg = "#000000";
-  const pillBorder = "rgba(255,255,255,0.14)";
-  const activeHighlight = "rgba(255,255,255,0.10)";
-  const inactiveTint = INACTIVE;
-  const labelInactive = INACTIVE;
+  const labelInactive = isDark ? "rgba(255,255,255,0.78)" : colors.mutedForeground;
+  const activeHighlight = isDark ? "rgba(255,255,255,0.10)" : "rgba(51,144,236,0.10)";
 
   return (
     <View
@@ -60,13 +84,13 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
       ]}
       pointerEvents="box-none"
     >
-      <View style={[styles.capsule, { backgroundColor: pillBg, borderColor: pillBorder }]}>
+      <GlassSurface isDark={isDark} style={styles.capsule}>
+        <View style={styles.capsuleRow}>
         {visibleRoutes.map((route) => {
           const { options } = descriptors[route.key];
           const isFocused = focusedRouteName === route.name;
           const label = options.title ?? route.name;
-          const meta = TAB_META[route.name];
-          const tint = isFocused ? ACTIVE : inactiveTint;
+          const iconSource = TAB_ICONS[route.name];
           const labelColor = isFocused ? ACTIVE : labelInactive;
 
           const onPress = () => {
@@ -93,13 +117,6 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
                 ? missedCallsUnreadCount
                 : badgeFromOptions;
 
-          const iconName =
-            meta != null
-              ? isFocused
-                ? meta.activeIcon
-                : meta.inactiveIcon
-              : "ellipse-outline";
-
           return (
             <TouchableOpacity
               key={route.key}
@@ -116,7 +133,22 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
                 ]}
               >
                 <View style={styles.iconWrap}>
-                  <Ionicons name={iconName} size={22} color={tint} />
+                  {iconSource ? (
+                    <Image
+                      source={iconSource}
+                      style={[
+                        styles.tabIcon,
+                        { transform: [{ scale: isFocused ? 1.08 : 1 }] },
+                      ]}
+                      contentFit="contain"
+                    />
+                  ) : (
+                    <Ionicons
+                      name="ellipse-outline"
+                      size={24}
+                      color={isFocused ? ACTIVE : labelInactive}
+                    />
+                  )}
                   {badge != null && badge !== 0 ? (
                     <View style={styles.badge}>
                       <Text style={styles.badgeText}>
@@ -138,17 +170,20 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
             </TouchableOpacity>
           );
         })}
-      </View>
+        </View>
+      </GlassSurface>
 
-      <TouchableOpacity
-        style={[styles.searchBtn, { backgroundColor: pillBg, borderColor: pillBorder }]}
-        activeOpacity={0.75}
-        onPress={openGlobalSearch}
-        accessibilityRole="button"
-        accessibilityLabel="Rechercher"
-      >
-        <Ionicons name="search" size={22} color={INACTIVE} />
-      </TouchableOpacity>
+      <GlassSurface isDark={isDark} style={styles.searchBtn}>
+        <TouchableOpacity
+          style={styles.searchBtnInner}
+          activeOpacity={0.75}
+          onPress={openGlobalSearch}
+          accessibilityRole="button"
+          accessibilityLabel="Rechercher"
+        >
+          <Ionicons name="search" size={22} color={isDark ? "#FFFFFF" : colors.text} />
+        </TouchableOpacity>
+      </GlassSurface>
     </View>
   );
 }
@@ -163,24 +198,34 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 10,
   },
-  capsule: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 999,
+  glassShell: {
+    overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    minHeight: 62,
     ...Platform.select({
       ios: {
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.35,
-        shadowRadius: 16,
+        shadowOpacity: 0.16,
+        shadowRadius: 18,
       },
-      android: { elevation: 12 },
+      android: { elevation: 8 },
     }),
+  },
+  glassContent: {
+    position: "relative",
+    zIndex: 1,
+  },
+  capsule: {
+    flex: 1,
+    borderRadius: 999,
+    minHeight: 62,
+  },
+  capsuleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    minHeight: 62,
   },
   tab: {
     flex: 1,
@@ -197,10 +242,14 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   iconWrap: {
-    width: 28,
-    height: 24,
+    width: 30,
+    height: 30,
     alignItems: "center",
     justifyContent: "center",
+  },
+  tabIcon: {
+    width: 28,
+    height: 28,
   },
   label: {
     fontSize: 9,
@@ -228,17 +277,11 @@ const styles = StyleSheet.create({
     width: 62,
     height: 62,
     borderRadius: 31,
-    borderWidth: StyleSheet.hairlineWidth,
+  },
+  searchBtnInner: {
+    width: 62,
+    height: 62,
     alignItems: "center",
     justifyContent: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.35,
-        shadowRadius: 16,
-      },
-      android: { elevation: 12 },
-    }),
   },
 });

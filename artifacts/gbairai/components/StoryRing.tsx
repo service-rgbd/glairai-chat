@@ -5,6 +5,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { GStory, GUser } from "@/contexts/chats-types";
 import { useColors } from "@/hooks/useColors";
 import { getDisplayMediaUrl, parseStoryMediaPayload } from "@/lib/media";
+import { storyTextColor } from "@/lib/story-text";
 
 import { Avatar } from "./Avatar";
 
@@ -17,58 +18,103 @@ interface StoryRingProps {
   size?: number;
 }
 
+const DEFAULT_SIZE = 72;
+
 export function StoryRing({
   user,
   stories,
   currentUserId = "me",
   isMe = false,
   onPress,
-  size = 62,
+  size = DEFAULT_SIZE,
 }: StoryRingProps) {
   const colors = useColors();
-  const hasUnseen = stories.some((s) => !s.viewerIds.includes(currentUserId));
   const hasStory = stories.length > 0;
+  const hasUnseen = stories.some((story) => !story.viewerIds.includes(currentUserId));
   const latest = stories[stories.length - 1];
   const mediaPayload = latest?.type !== "text" && latest ? parseStoryMediaPayload(latest.content) : null;
   const mediaUrl = mediaPayload ? getDisplayMediaUrl(mediaPayload.key, mediaPayload.url) : null;
   const storyThumbnailUrl = mediaPayload?.thumbnailUrl
     ? getDisplayMediaUrl("", mediaPayload.thumbnailUrl)
     : null;
-  const avatarSize = Math.min(size, 36);
+
+  const innerSize = size - 6;
+  const avatarSize = innerSize - 4;
+
+  const ringColor = hasStory
+    ? hasUnseen
+      ? colors.primary
+      : colors.mutedForeground
+    : colors.border;
 
   return (
-    <TouchableOpacity
-      style={[
-        styles.container,
-        {
-          backgroundColor: latest?.backgroundColor ?? colors.card,
-          borderColor: hasStory && hasUnseen ? colors.primary : colors.border,
-        },
-      ]}
-      onPress={onPress}
-      activeOpacity={0.84}
-    >
-      {latest?.type === "image" && mediaUrl ? (
-        <Image source={{ uri: mediaUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-      ) : latest?.type === "video" ? (
-        storyThumbnailUrl ? (
-          <Image source={{ uri: storyThumbnailUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-        ) : (
-          <View style={styles.videoBg}>
-            <Text style={styles.playIcon}>▶</Text>
-          </View>
-        )
-      ) : null}
-      <View style={styles.overlay} />
-      <View style={styles.avatarArea}>
-        <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={avatarSize} />
+    <TouchableOpacity style={[styles.item, { width: size + 14 }]} onPress={onPress} activeOpacity={0.84}>
+      <View
+        style={[
+          styles.ring,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderColor: ringColor,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.inner,
+            {
+              width: innerSize,
+              height: innerSize,
+              borderRadius: innerSize / 2,
+            },
+          ]}
+        >
+          {latest?.type === "text" ? (
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  backgroundColor: latest.backgroundColor || colors.primary,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingHorizontal: 6,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.textPreview,
+                  { color: storyTextColor(latest.backgroundColor || colors.primary) },
+                ]}
+                numberOfLines={2}
+              >
+                {latest.content}
+              </Text>
+            </View>
+          ) : latest?.type === "image" && mediaUrl ? (
+            <Image source={{ uri: mediaUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+          ) : latest?.type === "video" ? (
+            storyThumbnailUrl ? (
+              <Image source={{ uri: storyThumbnailUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+            ) : (
+              <View style={styles.videoBg}>
+                <Text style={styles.playIcon}>▶</Text>
+              </View>
+            )
+          ) : (
+            <Avatar uri={user.avatar} initials={user.initials} color={user.color} size={avatarSize} />
+          )}
+        </View>
+
         {isMe ? (
           <View style={[styles.addBadge, { backgroundColor: colors.primary }]}>
             <Text style={styles.addIcon}>+</Text>
           </View>
         ) : null}
       </View>
-      <Text style={styles.name} numberOfLines={2}>
+
+      <Text style={[styles.name, { color: colors.text, maxWidth: size + 14 }]} numberOfLines={1}>
         {isMe ? "Mon statut" : user.name.split(" ")[0]}
       </Text>
     </TouchableOpacity>
@@ -76,18 +122,25 @@ export function StoryRing({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    width: 104,
-    height: 152,
-    borderRadius: 18,
-    borderWidth: 2,
-    overflow: "hidden",
-    padding: 10,
-    justifyContent: "space-between",
+  item: {
+    alignItems: "center",
+    gap: 7,
   },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.25)",
+  ring: {
+    borderWidth: 2.5,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  inner: {
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+  },
+  textPreview: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
   },
   videoBg: {
     ...StyleSheet.absoluteFillObject,
@@ -97,31 +150,29 @@ const styles = StyleSheet.create({
   },
   playIcon: {
     color: "#fff",
-    fontSize: 28,
+    fontSize: 18,
   },
-  avatarArea: { alignSelf: "flex-start" },
   addBadge: {
     position: "absolute",
-    bottom: -4,
-    right: -4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    right: -1,
+    bottom: -1,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
   },
   addIcon: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
-    lineHeight: 20,
+    lineHeight: 16,
   },
   name: {
-    color: "#fff",
-    fontSize: 13,
-    fontFamily: "Inter_700Bold",
-    textShadowColor: "rgba(0,0,0,0.35)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    textAlign: "center",
   },
 });

@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { formatTimestamp } from "@/lib/format-timestamp";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
+import { assertCanStartCall } from "@/lib/call-session-client";
 
 export default function ProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -43,6 +44,12 @@ export default function ProfileScreen() {
 
   const openCall = (type: "audio" | "video") => {
     if (!chat || !user || isBlocked) return;
+    try {
+      assertCanStartCall(chat.id);
+    } catch {
+      Alert.alert("Occupé", "Terminez l'appel en cours avant d'en lancer un autre.");
+      return;
+    }
     const callId = startOutgoingCall({
       userId: user.id,
       conversationId: chat.id,

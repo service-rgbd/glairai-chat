@@ -4,8 +4,9 @@ import {
 import { Router, type IRouter } from "express";
 
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
+import { mapCallErrorStatus } from "../lib/call-errors";
 import { chatService } from "../lib/chat-service";
-import { createCallSession, getIncomingCallForUser, signalCall, type CallRole } from "../lib/call-service";
+import { createCallSession, getIncomingCallForUser, refreshCallToken, signalCall, type CallRole } from "../lib/call-service";
 
 const router: IRouter = Router();
 
@@ -14,15 +15,19 @@ function parseCallRole(value: unknown): CallRole | undefined {
   return undefined;
 }
 
+function respondCallError(res: import("express").Response, error: unknown) {
+  res.status(mapCallErrorStatus(error)).json({
+    message:
+      error instanceof Error ? error.message : "Impossible de traiter l'appel",
+  });
+}
+
 router.get("/calls/incoming", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const result = await getIncomingCallForUser(req.authToken!);
     res.json({ call: result });
   } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error ? error.message : "Impossible de récupérer l'appel entrant",
-    });
+    respondCallError(res, error);
   }
 });
 
@@ -34,10 +39,20 @@ router.post("/calls/token", requireAuth, async (req: AuthenticatedRequest, res) 
     const result = await createCallSession(req.authToken!, { ...base, role, callId });
     res.json(result);
   } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error ? error.message : "Impossible de préparer l'appel",
-    });
+    respondCallError(res, error);
+  }
+});
+
+router.post("/calls/refresh-token", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const callId = typeof req.body?.callId === "string" ? req.body.callId : "";
+    if (!callId) {
+      throw new Error("Identifiant d'appel requis");
+    }
+    const result = await refreshCallToken(req.authToken!, callId);
+    res.json(result);
+  } catch (error) {
+    respondCallError(res, error);
   }
 });
 
@@ -65,10 +80,7 @@ router.post("/calls/signal", requireAuth, async (req: AuthenticatedRequest, res)
     });
     res.json(result);
   } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error ? error.message : "Impossible de mettre à jour l'appel",
-    });
+    respondCallError(res, error);
   }
 });
 
@@ -106,10 +118,7 @@ router.post("/calls/log", requireAuth, async (req: AuthenticatedRequest, res) =>
     });
     res.json(result);
   } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error ? error.message : "Impossible d'enregistrer l'appel",
-    });
+    respondCallError(res, error);
   }
 });
 

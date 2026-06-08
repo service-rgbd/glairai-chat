@@ -18,6 +18,7 @@ export function useLocalParticipant() {
       identity: "local",
       setMicrophoneEnabled: async () => undefined,
       setCameraEnabled: async () => undefined,
+      getTrackPublication: () => undefined,
     },
   };
 }
@@ -25,6 +26,16 @@ export function useLocalParticipant() {
 export function useRemoteParticipants() {
   return [];
 }
+
+export function useRoomContext() {
+  return null;
+}
+
+export const AudioSession = {
+  startAudioSession: async () => undefined,
+  getAudioOutputs: async () => [] as string[],
+  selectAudioOutput: async (_output: string) => undefined,
+};
 
 export function VideoTrack() {
   return <View />;

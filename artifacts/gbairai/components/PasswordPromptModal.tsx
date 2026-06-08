@@ -1,3 +1,4 @@
+import { Image, type ImageSource } from "expo-image";
 import React, { useEffect, useState } from "react";
 import {
   Modal,
@@ -16,6 +17,7 @@ interface PasswordPromptModalProps {
   title: string;
   description?: string;
   confirmLabel?: string;
+  icon?: ImageSource;
   onClose: () => void;
   onSubmit: (password: string) => Promise<boolean> | boolean;
 }
@@ -25,6 +27,7 @@ export function PasswordPromptModal({
   title,
   description,
   confirmLabel = "Valider",
+  icon,
   onClose,
   onSubmit,
 }: PasswordPromptModalProps) {
@@ -65,6 +68,12 @@ export function PasswordPromptModal({
           style={[styles.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}
           onStartShouldSetResponder={() => true}
         >
+          {icon ? (
+            <View style={styles.iconWrap}>
+              <Image source={icon} style={styles.iconImage} contentFit="contain" />
+            </View>
+          ) : null}
+
           <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
           {description ? (
             <Text style={[styles.description, { color: colors.mutedForeground }]}>
@@ -115,23 +124,36 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   sheet: {
-    borderRadius: 18,
+    borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 18,
+    padding: 20,
     gap: 12,
+    alignItems: "center",
+  },
+  iconWrap: {
+    width: 72,
+    height: 72,
+    marginBottom: 4,
+  },
+  iconImage: {
+    width: 72,
+    height: 72,
   },
   title: {
     fontSize: 18,
     fontFamily: "Inter_700Bold",
+    textAlign: "center",
   },
   description: {
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     lineHeight: 20,
+    textAlign: "center",
   },
   input: {
+    alignSelf: "stretch",
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
@@ -140,12 +162,15 @@ const styles = StyleSheet.create({
   error: {
     fontSize: 13,
     fontFamily: "Inter_500Medium",
+    alignSelf: "stretch",
+    textAlign: "center",
   },
   actions: {
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: 10,
     marginTop: 4,
+    alignSelf: "stretch",
   },
   actionBtn: {
     paddingHorizontal: 16,

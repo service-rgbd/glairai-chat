@@ -1,6 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { finalizeCall, getCallSession, markCallLogCreated } from "./call-session-store";
+import { sendVoipIncomingCallPushes } from "./apn-voip-push";
 import { encodeCallMessagePayload, isCallMessageContent, type CallMessageOutcome } from "./call-messages";
 import {
   encodeDeletedMessageContent,
@@ -271,7 +272,7 @@ export interface ChatService {
   }>;
   registerDeviceToken(
     token: string,
-    input: { pushToken: string; platform: string; deviceName: string },
+    input: { pushToken: string; platform: string; deviceName: string; voipPushToken?: string },
   ): Awaitable<{ id: string; pushToken: string; platform: string; deviceName: string }>;
   listStories(token: string): Awaitable<{ stories: StorySummary[] }>;
   blockUser(token: string, targetUserId: string): Awaitable<{ userId: string }>;
@@ -305,6 +306,7 @@ export interface ChatService {
       callId: string;
     },
   ): Awaitable<void>;
+  assertDirectCallAllowed(userA: string, userB: string): Awaitable<void>;
   publishCallAnswered(
     token: string,
     input: { callId: string; conversationId: string; calleeUserId: string },
@@ -407,6 +409,7 @@ interface DeviceRecord {
   id: string;
   userId: string;
   pushToken: string;
+  voipPushToken?: string | null;
   platform: string;
   deviceName: string;
 }
@@ -583,8 +586,8 @@ async function sendExpoIncomingCallPushes(
 
   if (!payload.length) return;
 
-  try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
+  const sendOnce = async () => {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -592,8 +595,19 @@ async function sendExpoIncomingCallPushes(
       },
       body: JSON.stringify(payload),
     });
-  } catch {
-    // Notifications are best-effort in development.
+    return response.ok;
+  };
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const ok = await sendOnce();
+      if (ok) return;
+    } catch {
+      // Retry below.
+    }
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+    }
   }
 }
 
@@ -1134,7 +1148,7 @@ class InMemoryChatService {
 
   registerDeviceToken(
     token: string,
-    input: { pushToken: string; platform: string; deviceName: string },
+    input: { pushToken: string; platform: string; deviceName: string; voipPushToken?: string },
   ) {
     const user = this.requireUserByToken(token);
     if (input.deviceName.trim().length === 0) {
@@ -1151,6 +1165,7 @@ class InMemoryChatService {
       id: existing?.id ?? randomId("device"),
       userId: user.id,
       pushToken: input.pushToken,
+      voipPushToken: input.voipPushToken ?? existing?.voipPushToken ?? null,
       platform: input.platform,
       deviceName: input.deviceName,
     };
@@ -2800,7 +2815,7 @@ class DatabaseChatService implements ChatService {
 
   async registerDeviceToken(
     token: string,
-    input: { pushToken: string; platform: string; deviceName: string },
+    input: { pushToken: string; platform: string; deviceName: string; voipPushToken?: string },
   ) {
     const user = await this.requireUserByToken(token);
     if (input.deviceName.trim().length === 0) {
@@ -2817,6 +2832,7 @@ class DatabaseChatService implements ChatService {
         id,
         userId: user.id,
         pushToken: input.pushToken,
+        voipPushToken: input.voipPushToken ?? null,
         platform: input.platform,
         deviceName: input.deviceName,
         updatedAt: new Date(),
@@ -2827,6 +2843,7 @@ class DatabaseChatService implements ChatService {
           userId: user.id,
           platform: input.platform,
           deviceName: input.deviceName,
+          ...(input.voipPushToken ? { voipPushToken: input.voipPushToken } : {}),
           updatedAt: new Date(),
         },
       });
@@ -3040,6 +3057,7 @@ class DatabaseChatService implements ChatService {
     const devices = await db!
       .select({
         pushToken: deviceTokensTable.pushToken,
+        voipPushToken: deviceTokensTable.voipPushToken,
         notificationSoundEnabled: usersTable.notificationSoundEnabled,
       })
       .from(deviceTokensTable)
@@ -3050,6 +3068,19 @@ class DatabaseChatService implements ChatService {
           eq(usersTable.notificationsEnabled, true),
         ),
       );
+
+    const voipSent = await sendVoipIncomingCallPushes(devices, {
+      callerName: input.callerName,
+      callerAvatarUrl: input.callerAvatarUrl,
+      conversationId: input.conversationId,
+      callType: input.type,
+      callerUserId: input.callerUserId,
+      callId: input.callId,
+    });
+
+    if (voipSent > 0) {
+      return;
+    }
 
     await sendExpoIncomingCallPushes(devices, {
       callerName: input.callerName,
@@ -3086,7 +3117,7 @@ class DatabaseChatService implements ChatService {
       conversationId: session.conversationId,
       callerUserId: session.callerUserId,
       callType: liveSession?.type ?? "audio",
-      outcome: "missed",
+      outcome: "cancelled",
     });
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
@@ -3682,6 +3713,12 @@ class DatabaseChatService implements ChatService {
       )
       .limit(1);
     return Boolean(row);
+  }
+
+  async assertDirectCallAllowed(userA: string, userB: string) {
+    if (await this.isEitherBlocked(userA, userB)) {
+      throw new Error("Appel impossible avec ce contact");
+    }
   }
 
   async blockUser(token: string, targetUserId: string) {

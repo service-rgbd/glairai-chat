@@ -20,16 +20,19 @@ import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import { configureCallAudioMode, resetCallAudioMode, type CallSoundPhase } from "@/lib/call-audio";
 import { CALL_RING_TIMEOUT_MS } from "@/lib/call-config";
+import { callNetworkLabel, useCallNetworkStatus } from "@/lib/call-network";
 import { isNativeCallSupported, isExpoGoRuntime } from "@/lib/call-runtime";
 import { subscribeCallSignal } from "@/lib/call-signaling";
 import { logConversationCall, resolveCallLogOutcome } from "@/lib/call-log";
 import {
   prepareConversationCall,
   signalConversationCall,
+  CallRequestError,
   type CallSignalMeta,
   type PreparedCallSession,
 } from "@/lib/calls";
 import { clearIncomingCallIfMatches } from "@/lib/incoming-call";
+import { assertCanStartCall, setActiveCall } from "@/lib/call-session-client";
 
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -61,6 +64,8 @@ export default function CallScreen() {
   const [session, setSession] = useState<PreparedCallSession | null>(null);
   const [soundPhase, setSoundPhase] = useState<CallSoundPhase>("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const networkStatus = useCallNetworkStatus(Boolean(session));
 
   const activeCallIdRef = useRef<string | null>(null);
   const activeCallSessionIdRef = useRef<string | null>(null);
@@ -69,6 +74,7 @@ export default function CallScreen() {
   const hangupRef = useRef(false);
   const wasConnectedRef = useRef(false);
   const callAnsweredRef = useRef(false);
+  const remoteLeftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chat = useMemo(
     () => chats.find((item) => item.id === conversationId),
@@ -106,6 +112,7 @@ export default function CallScreen() {
       }
 
       clearIncomingCallIfMatches(activeCallSessionIdRef.current);
+      setActiveCall(null);
       setSoundPhase("ended");
       void resetCallAudioMode();
 
@@ -209,6 +216,9 @@ export default function CallScreen() {
       try {
         setIsLoading(true);
         setError(null);
+        if (!isIncoming) {
+          assertCanStartCall(conversationId);
+        }
         await configureCallAudioMode(callType === "video");
         const nextSession = await prepareConversationCall(conversationId, callType, authToken, {
           role: isIncoming ? "callee" : "caller",
@@ -217,6 +227,10 @@ export default function CallScreen() {
         if (cancelled) return;
         setSession(nextSession);
         activeCallSessionIdRef.current = nextSession.callId;
+        setActiveCall({
+          callSessionId: nextSession.callId,
+          conversationId,
+        });
         if (isIncoming || nextSession.role === "callee") {
           callAnsweredRef.current = true;
         }
@@ -224,7 +238,13 @@ export default function CallScreen() {
         setSoundPhase("ringing");
       } catch (cause) {
         if (cancelled) return;
-        setError(cause instanceof Error ? cause.message : "Impossible de préparer l'appel");
+        const message =
+          cause instanceof CallRequestError
+            ? cause.message
+            : cause instanceof Error
+              ? cause.message
+              : "Impossible de préparer l'appel";
+        setError(message);
       } finally {
         if (!cancelled) {
           setIsLoading(false);
@@ -317,16 +337,39 @@ export default function CallScreen() {
   }, [hangup, isIncoming, soundPhase]);
 
   const handleRemoteJoined = useCallback(() => {
+    if (remoteLeftTimerRef.current) {
+      clearTimeout(remoteLeftTimerRef.current);
+      remoteLeftTimerRef.current = null;
+    }
     if (connectedAtRef.current != null) return;
     connectedAtRef.current = Date.now();
     wasConnectedRef.current = true;
     setSoundPhase("connected");
+    const sessionCallId = activeCallSessionIdRef.current;
+    if (sessionCallId) {
+      void import("@/lib/call-system-ui").then(({ reportNativeCallConnected }) => {
+        reportNativeCallConnected(sessionCallId);
+      });
+    }
   }, []);
 
   const handleRemoteLeft = useCallback(() => {
-    if (!wasConnectedRef.current) return;
-    void hangup();
+    if (!wasConnectedRef.current || hangupRef.current) return;
+    if (remoteLeftTimerRef.current) return;
+    remoteLeftTimerRef.current = setTimeout(() => {
+      remoteLeftTimerRef.current = null;
+      void hangup();
+    }, 8_000);
   }, [hangup]);
+
+  useEffect(() => {
+    return () => {
+      if (remoteLeftTimerRef.current) {
+        clearTimeout(remoteLeftTimerRef.current);
+      }
+      setActiveCall(null);
+    };
+  }, []);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -343,6 +386,12 @@ export default function CallScreen() {
         {soundPhase === "connected" ? (
           <Text style={[styles.duration, { color: colors.mutedForeground }]}>
             {formatDuration(elapsedSeconds)}
+          </Text>
+        ) : isReconnecting ? (
+          <Text style={[styles.duration, { color: colors.primary }]}>Reconnexion…</Text>
+        ) : callNetworkLabel(networkStatus) ? (
+          <Text style={[styles.duration, { color: colors.destructive }]}>
+            {callNetworkLabel(networkStatus)}
           </Text>
         ) : null}
       </View>
@@ -371,6 +420,8 @@ export default function CallScreen() {
           serverUrl={session.url}
           token={session.token}
           callType={callType}
+          callSessionId={session.callId}
+          authToken={authToken}
           otherUserName={otherUser?.name ?? currentUser?.name ?? "Appel"}
           otherUserAvatar={otherUser?.avatar ?? null}
           otherUserInitials={otherUser?.initials ?? "??"}
@@ -378,6 +429,11 @@ export default function CallScreen() {
           onConnected={() => undefined}
           onRemoteJoined={handleRemoteJoined}
           onRemoteLeft={handleRemoteLeft}
+          onReconnecting={() => setIsReconnecting(true)}
+          onReconnected={() => setIsReconnecting(false)}
+          onTokenRefreshed={(nextToken) => {
+            setSession((current) => (current ? { ...current, token: nextToken } : current));
+          }}
           onDisconnected={() => void hangup()}
           onError={(message) => setError(message)}
         />

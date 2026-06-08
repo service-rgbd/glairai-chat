@@ -2,6 +2,16 @@ import type { CallSession, CreateCallTokenInputType } from "@workspace/api-clien
 
 import { getApiBaseUrl } from "./api-config";
 
+export class CallRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = "CallRequestError";
+    this.status = status;
+  }
+}
+
 export type CallRole = "caller" | "callee";
 export type CallSignalAction = "cancel" | "decline" | "end";
 
@@ -35,7 +45,7 @@ async function getCallApi<T>(path: string, authToken: string): Promise<T> {
 
   const payload = (await response.json().catch(() => ({}))) as { message?: string };
   if (!response.ok) {
-    throw new Error(payload.message ?? "Impossible de gérer l'appel");
+    throw new CallRequestError(payload.message ?? "Impossible de gérer l'appel", response.status);
   }
 
   return payload as T;
@@ -53,7 +63,7 @@ async function postCallApi<T>(path: string, body: unknown, authToken: string): P
 
   const payload = (await response.json().catch(() => ({}))) as { message?: string };
   if (!response.ok) {
-    throw new Error(payload.message ?? "Impossible de gérer l'appel");
+    throw new CallRequestError(payload.message ?? "Impossible de gérer l'appel", response.status);
   }
 
   return payload as T;
@@ -99,6 +109,10 @@ export async function fetchPendingIncomingCall(authToken: string) {
     authToken,
   );
   return payload.call;
+}
+
+export async function refreshConversationCallToken(callId: string, authToken: string) {
+  return postCallApi<PreparedCallSession>("/calls/refresh-token", { callId }, authToken);
 }
 
 /** Compatibilité ascendante. */

@@ -9,7 +9,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
-        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
       },
       "ios": {
         "simulator": false,
@@ -26,7 +27,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
-        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
       },
       "ios": {
         "simulator": true,
@@ -38,7 +40,8 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
-        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
       },
       "ios": {
         "resourceClass": "m-medium"
@@ -48,7 +51,8 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
-        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true"
+        "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
+        "EXPO_PUBLIC_NATIVE_CALL_UI": "true"
       },
       "ios": {
         "resourceClass": "m-medium"

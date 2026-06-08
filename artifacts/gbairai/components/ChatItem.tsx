@@ -22,6 +22,7 @@ interface ChatItemProps {
   userStories?: GStory[];
   onStoryPress?: () => void;
   onPress: () => void;
+  onLongPress?: () => void;
 }
 
 export function ChatItem({
@@ -34,6 +35,7 @@ export function ChatItem({
   userStories = [],
   onStoryPress,
   onPress,
+  onLongPress,
 }: ChatItemProps) {
   const colors = useColors();
   const isGroup = chat.type === "group";
@@ -87,7 +89,13 @@ export function ChatItem({
   };
 
   return (
-    <TouchableOpacity style={[styles.container, { borderBottomColor: colors.border }]} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity
+      style={[styles.container, { borderBottomColor: colors.border }]}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={320}
+      activeOpacity={0.7}
+    >
       {hasStory ? (
         <TouchableOpacity
           onPress={() => onStoryPress?.()}

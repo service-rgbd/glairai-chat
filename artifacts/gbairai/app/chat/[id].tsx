@@ -1,7 +1,8 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeKeyboardAvoidingView as KeyboardAvoidingView } from "@/components/SafeKeyboardAvoidingView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +11,7 @@ import { Avatar } from "@/components/Avatar";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatOptionsSheet } from "@/components/ChatOptionsSheet";
 import { ChatWallpaper } from "@/components/ChatWallpaper";
+import { ConversationSearchModal } from "@/components/ConversationSearchModal";
 import { MessageActionsModal } from "@/components/MessageActionsModal";
 import { MessageBubble } from "@/components/MessageBubble";
 import { MessageEditModal } from "@/components/MessageEditModal";
@@ -24,11 +26,21 @@ import {
   getGroupDisplayInitials,
   getGroupMemberCountLabel,
 } from "@/lib/group-utils";
+import { assertCanStartCall } from "@/lib/call-session-client";
 import {
   getDeleteMessageTitle,
   getMessageActionAvailability,
 } from "@/lib/message-actions";
-import { openGlobalSearch } from "@/lib/navigation";
+
+function hexToRgba(hex: string, alpha: number) {
+  const normalized = hex.replace("#", "");
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+const HEADER_BODY_HEIGHT = 62;
 
 export default function ChatScreen() {
   const { id, recordVoice } = useLocalSearchParams<{ id: string; recordVoice?: string }>();
@@ -67,6 +79,7 @@ export default function ChatScreen() {
   const [showActionsModal, setShowActionsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
+  const [showConversationSearch, setShowConversationSearch] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const chat = chats.find((c) => c.id === id);
@@ -97,6 +110,23 @@ export default function ChatScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const topFadeHeight = topPad + HEADER_BODY_HEIGHT + 28;
+  const bottomFadeHeight = bottomPad + 76;
+  const edgeFadeColors = useMemo(
+    () => ({
+      top: [
+        hexToRgba(colors.background, 0.94),
+        hexToRgba(colors.background, 0.55),
+        hexToRgba(colors.background, 0),
+      ] as const,
+      bottom: [
+        hexToRgba(colors.background, 0),
+        hexToRgba(colors.background, 0.55),
+        hexToRgba(colors.background, 0.94),
+      ] as const,
+    }),
+    [colors.background],
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -126,6 +156,12 @@ export default function ChatScreen() {
 
   const openCall = (type: "audio" | "video") => {
     if (!id || !otherUser || isGroup || isBlockedContact) return;
+    try {
+      assertCanStartCall(id);
+    } catch {
+      Alert.alert("Occupé", "Terminez l'appel en cours avant d'en lancer un autre.");
+      return;
+    }
     const callId = startOutgoingCall({
       userId: otherUser.id,
       conversationId: id,
@@ -136,6 +172,116 @@ export default function ChatScreen() {
       params: { conversationId: id, type, callId },
     });
   };
+
+  const handleSelectSearchMessage = (message: GMessage) => {
+    const reversedMessages = [...chatMessages].reverse();
+    const index = reversedMessages.findIndex((item) => item.id === message.id);
+    if (index < 0) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    });
+  };
+
+  const chatMenuOptions = [
+    {
+      key: "search",
+      label: "Rechercher",
+      icon: "search-outline" as const,
+      onPress: () => setShowConversationSearch(true),
+    },
+    {
+      key: "archive",
+      label: chat?.isArchived ? "Désarchiver" : "Archiver",
+      icon: "archive-outline" as const,
+      onPress: () => {
+        if (!id) return;
+        void archiveConversation(id, !chat?.isArchived)
+          .then(() => {
+            if (!chat?.isArchived) {
+              router.back();
+            }
+          })
+          .catch((error) => {
+            Alert.alert(
+              "Action impossible",
+              error instanceof Error ? error.message : "Impossible d'archiver cette conversation.",
+            );
+          });
+      },
+    },
+    ...(isGroup && id
+      ? [
+          {
+            key: "group-info",
+            label: "Infos du groupe",
+            icon: "people-outline" as const,
+            onPress: () => router.push(`/group/${id}`),
+          },
+        ]
+      : []),
+    ...(!isGroup && otherUser
+      ? [
+          {
+            key: "report",
+            label: "Signaler",
+            icon: "flag-outline" as const,
+            onPress: () => {
+              Alert.alert(
+                "Signalement envoyé",
+                "Merci. Notre équipe examinera ce signalement.",
+              );
+            },
+          },
+          {
+            key: "block",
+            label: isBlockedContact ? "Débloquer" : `Bloquer ${otherUser.name.split(" ")[0]}`,
+            icon: "ban-outline" as const,
+            destructive: !isBlockedContact,
+            onPress: () => {
+              if (isBlockedContact) {
+                Alert.alert(
+                  "Débloquer",
+                  `Autoriser à nouveau ${otherUser.name} ?`,
+                  [
+                    { text: "Annuler", style: "cancel" },
+                    {
+                      text: "Débloquer",
+                      onPress: () => {
+                        void unblockUser(otherUser.id).catch(() => undefined);
+                      },
+                    },
+                  ],
+                );
+                return;
+              }
+              Alert.alert(
+                "Bloquer",
+                `${otherUser.name} ne pourra plus vous contacter et ses statuts seront masqués.`,
+                [
+                  { text: "Annuler", style: "cancel" },
+                  {
+                    text: "Bloquer",
+                    style: "destructive",
+                    onPress: () => {
+                      void blockUser(otherUser.id)
+                        .then(() => router.back())
+                        .catch((error) => {
+                          Alert.alert(
+                            "Action impossible",
+                            error instanceof Error ? error.message : "Impossible de bloquer cet utilisateur.",
+                          );
+                        });
+                    },
+                  },
+                ],
+              );
+            },
+          },
+        ]
+      : []),
+  ];
 
   const selectedMessageActions = selectedMessage
     ? getMessageActionAvailability(selectedMessage, currentUserId)
@@ -271,13 +417,85 @@ export default function ChatScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 6, backgroundColor: colors.headerBg, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={26} color={colors.primary} />
-        </TouchableOpacity>
+      <ChatWallpaper wallpaperId={wallpaperId} />
+
+      <View style={styles.screenContent}>
+        <FlatList
+          ref={listRef}
+          data={[...chatMessages].reverse()}
+          keyExtractor={(m) => m.id}
+          inverted
+          renderItem={renderMessage}
+          style={styles.messageListFullBleed}
+          contentContainerStyle={[
+            styles.messageList,
+            { paddingBottom: topFadeHeight, paddingTop: bottomFadeHeight },
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={!!chatMessages.length}
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({
+              offset: info.averageItemLength * info.index,
+              animated: true,
+            });
+          }}
+          ListEmptyComponent={
+            <View style={styles.emptyChat}>
+              <Text style={[styles.emptyChatText, { color: colors.mutedForeground }]}>
+                Dites bonjour à {displayName}!
+              </Text>
+            </View>
+          }
+        />
+
+        <LinearGradient
+          pointerEvents="none"
+          colors={[...edgeFadeColors.top]}
+          locations={[0, 0.55, 1]}
+          style={[styles.edgeFade, { top: 0, height: topFadeHeight }]}
+        />
+        <LinearGradient
+          pointerEvents="none"
+          colors={[...edgeFadeColors.bottom]}
+          locations={[0, 0.45, 1]}
+          style={[styles.edgeFade, { bottom: 0, height: bottomFadeHeight }]}
+        />
+
+        <View style={[styles.floatingHeader, { paddingTop: topPad + 8 }]}>
+        <View style={styles.headerLeftCluster}>
+          <View style={[styles.backPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backPillBtn} activeOpacity={0.7}>
+              <Ionicons name="chevron-back" size={22} color={colors.text} />
+            </TouchableOpacity>
+            {(chat?.unreadCount ?? 0) > 0 ? (
+              <View style={styles.backBadge}>
+                <Text style={styles.backBadgeText}>
+                  {chat!.unreadCount > 99 ? "99+" : chat!.unreadCount}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            style={[styles.headerAvatarRing, { borderColor: avatarColor, backgroundColor: colors.card }]}
+            onPress={() => {
+              if (isGroup && id) {
+                router.push(`/group/${id}`);
+                return;
+              }
+              if (otherUser) {
+                router.push(`/profile/${otherUser.id}`);
+              }
+            }}
+            activeOpacity={0.82}
+          >
+            <Avatar uri={avatarUri} initials={initials} color={avatarColor} size={36} showOnline={!isGroup} isOnline={isOnline} />
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity
-          style={styles.headerUser}
+          style={[styles.headerCenterPill, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={() => {
             if (isGroup && id) {
               router.push(`/group/${id}`);
@@ -287,115 +505,93 @@ export default function ChatScreen() {
               router.push(`/profile/${otherUser.id}`);
             }
           }}
-          activeOpacity={0.8}
+          activeOpacity={0.82}
         >
-          <View style={styles.headerAvatarWrap}>
-            <Avatar uri={avatarUri} initials={initials} color={avatarColor} size={40} showOnline={!isGroup} isOnline={isOnline} />
-          </View>
-          <View style={styles.headerInfo}>
-            <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>{displayName}</Text>
-            <Text
-              style={[
-                styles.headerStatus,
-                {
-                  color:
-                    groupTypingLabel || isOtherUserTyping
-                      ? colors.primary
-                      : isOnline
-                        ? colors.online
-                        : colors.mutedForeground,
-                },
-              ]}
-            >
-              {groupTypingLabel ?? (isOtherUserTyping ? "en train d'écrire..." : statusText)}
-            </Text>
-          </View>
+          <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
+            {displayName}
+          </Text>
+          <Text
+            style={[
+              styles.headerStatus,
+              {
+                color:
+                  groupTypingLabel || isOtherUserTyping
+                    ? colors.primary
+                    : isOnline
+                      ? colors.online
+                      : colors.mutedForeground,
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {groupTypingLabel ?? (isOtherUserTyping ? "en train d'écrire..." : statusText)}
+          </Text>
         </TouchableOpacity>
 
-        <View style={styles.headerActions}>
+        <View style={styles.headerRightCluster}>
           {!isGroup ? (
             <>
-              <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7} onPress={() => openCall("audio")}>
-                <Ionicons name="call-outline" size={22} color={colors.text} />
+              <TouchableOpacity
+                style={[styles.headerCircleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+                activeOpacity={0.7}
+                onPress={() => openCall("audio")}
+              >
+                <Ionicons name="call-outline" size={18} color={colors.text} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7} onPress={() => openCall("video")}>
-                <Ionicons name="videocam-outline" size={22} color={colors.text} />
+              <TouchableOpacity
+                style={[styles.headerCircleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+                activeOpacity={0.7}
+                onPress={() => openCall("video")}
+              >
+                <Ionicons name="videocam-outline" size={18} color={colors.text} />
               </TouchableOpacity>
             </>
           ) : null}
           <TouchableOpacity
-            style={styles.actionBtn}
+            style={[styles.headerCircleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
             activeOpacity={0.7}
-            onPress={() => {
-              if (isGroup && id) {
-                router.push(`/group/${id}`);
-                return;
-              }
-              setShowChatOptions(true);
-            }}
+            onPress={() => setShowChatOptions(true)}
           >
-            <Feather name="more-vertical" size={20} color={colors.text} />
+            <Feather name="more-vertical" size={18} color={colors.text} />
           </TouchableOpacity>
         </View>
-      </View>
-
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
-        <View style={styles.messagesPane}>
-          <ChatWallpaper wallpaperId={wallpaperId} />
-          <FlatList
-            ref={listRef}
-            data={[...chatMessages].reverse()}
-            keyExtractor={(m) => m.id}
-            inverted
-            renderItem={renderMessage}
-            style={styles.messageListView}
-            contentContainerStyle={[styles.messageList, { paddingBottom: 12 }]}
-            showsVerticalScrollIndicator={false}
-            keyboardDismissMode="interactive"
-            keyboardShouldPersistTaps="handled"
-            scrollEnabled={!!chatMessages.length}
-            ListEmptyComponent={
-              <View style={styles.emptyChat}>
-                <Text style={[styles.emptyChatText, { color: colors.mutedForeground }]}>
-                  Dites bonjour à {displayName}!
-                </Text>
-              </View>
-            }
-          />
         </View>
-        {isBlockedContact ? (
-          <View style={[styles.blockedBanner, { backgroundColor: colors.muted }]}>
-            <Text style={[styles.blockedBannerText, { color: colors.mutedForeground }]}>
-              Vous avez bloqué {otherUser?.name?.split(" ")[0] ?? "cet utilisateur"}. Vous ne recevrez plus ses messages.
-            </Text>
-          </View>
-        ) : null}
-        {!isBlockedContact ? (
-        <ChatInput
-          conversationId={id}
-          autoStartVoiceRecording={recordVoice === "1"}
-          onSend={handleSend}
-          onSendEmoji3d={handleSendEmoji3d}
-          onSendAudio={(payload) => {
-            if (!id) return;
-            sendAudioMessage(id, payload);
-          }}
-          onSendImage={(payload) => {
-            if (!id) return;
-            sendImageMessage(id, payload);
-          }}
-          onSendVideo={(payload) => {
-            if (!id) return;
-            sendVideoMessage(id, payload);
-          }}
-          onTypingChange={(isTyping) => {
-            if (!id) return;
-            setTypingState(id, isTyping);
-          }}
-          bottomInset={bottomPad}
-        />
-        ) : null}
-      </KeyboardAvoidingView>
+
+        <KeyboardAvoidingView style={styles.inputDock} behavior="padding" keyboardVerticalOffset={0}>
+          {isBlockedContact ? (
+            <View style={[styles.blockedBanner, { backgroundColor: colors.muted }]}>
+              <Text style={[styles.blockedBannerText, { color: colors.mutedForeground }]}>
+                Vous avez bloqué {otherUser?.name?.split(" ")[0] ?? "cet utilisateur"}. Vous ne recevrez plus ses messages.
+              </Text>
+            </View>
+          ) : null}
+          {!isBlockedContact ? (
+          <ChatInput
+            conversationId={id}
+            autoStartVoiceRecording={recordVoice === "1"}
+            onSend={handleSend}
+            onSendEmoji3d={handleSendEmoji3d}
+            onSendAudio={(payload) => {
+              if (!id) return;
+              sendAudioMessage(id, payload);
+            }}
+            onSendImage={(payload) => {
+              if (!id) return;
+              sendImageMessage(id, payload);
+            }}
+            onSendVideo={(payload) => {
+              if (!id) return;
+              sendVideoMessage(id, payload);
+            }}
+            onTypingChange={(isTyping) => {
+              if (!id) return;
+              setTypingState(id, isTyping);
+            }}
+            bottomInset={bottomPad}
+          />
+          ) : null}
+        </KeyboardAvoidingView>
+      </View>
 
       <MessageActionsModal
         visible={showActionsModal}
@@ -418,97 +614,21 @@ export default function ChatScreen() {
         }}
       />
 
-      {!isGroup && otherUser ? (
-        <ChatOptionsSheet
-          visible={showChatOptions}
-          onClose={() => setShowChatOptions(false)}
-          title={displayName}
-          options={[
-            {
-              key: "search",
-              label: "Rechercher",
-              icon: "search-outline",
-              onPress: () => openGlobalSearch(),
-            },
-            {
-              key: "archive",
-              label: chat?.isArchived ? "Désarchiver" : "Archiver",
-              icon: chat?.isArchived ? "archive-outline" : "archive-outline",
-              onPress: () => {
-                if (!id) return;
-                void archiveConversation(id, !chat?.isArchived)
-                  .then(() => {
-                    if (!chat?.isArchived) {
-                      router.back();
-                    }
-                  })
-                  .catch((error) => {
-                    Alert.alert(
-                      "Action impossible",
-                      error instanceof Error ? error.message : "Impossible d'archiver cette conversation.",
-                    );
-                  });
-              },
-            },
-            {
-              key: "report",
-              label: "Signaler",
-              icon: "flag-outline",
-              onPress: () => {
-                Alert.alert(
-                  "Signalement envoyé",
-                  "Merci. Notre équipe examinera ce signalement.",
-                );
-              },
-            },
-            {
-              key: "block",
-              label: isBlockedContact ? "Débloquer" : `Bloquer ${otherUser.name.split(" ")[0]}`,
-              icon: "ban-outline",
-              destructive: !isBlockedContact,
-              onPress: () => {
-                if (isBlockedContact) {
-                  Alert.alert(
-                    "Débloquer",
-                    `Autoriser à nouveau ${otherUser.name} ?`,
-                    [
-                      { text: "Annuler", style: "cancel" },
-                      {
-                        text: "Débloquer",
-                        onPress: () => {
-                          void unblockUser(otherUser.id).catch(() => undefined);
-                        },
-                      },
-                    ],
-                  );
-                  return;
-                }
-                Alert.alert(
-                  "Bloquer",
-                  `${otherUser.name} ne pourra plus vous contacter et ses statuts seront masqués.`,
-                  [
-                    { text: "Annuler", style: "cancel" },
-                    {
-                      text: "Bloquer",
-                      style: "destructive",
-                      onPress: () => {
-                        void blockUser(otherUser.id)
-                          .then(() => router.back())
-                          .catch((error) => {
-                            Alert.alert(
-                              "Action impossible",
-                              error instanceof Error ? error.message : "Impossible de bloquer cet utilisateur.",
-                            );
-                          });
-                      },
-                    },
-                  ],
-                );
-              },
-            },
-          ]}
-        />
-      ) : null}
+      <ChatOptionsSheet
+        visible={showChatOptions}
+        onClose={() => setShowChatOptions(false)}
+        title={displayName}
+        subtitle="Gérer cette conversation"
+        options={chatMenuOptions}
+      />
+
+      <ConversationSearchModal
+        visible={showConversationSearch}
+        conversationTitle={displayName}
+        messages={chatMessages}
+        onClose={() => setShowConversationSearch(false)}
+        onSelectMessage={handleSelectSearchMessage}
+      />
 
       <MessageEditModal
         visible={showEditModal}
@@ -526,46 +646,136 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  header: {
+  root: { flex: 1, overflow: "hidden" },
+  screenContent: {
+    flex: 1,
+    zIndex: 1,
+  },
+  messageListFullBleed: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+  },
+  edgeFade: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    zIndex: 1,
+  },
+  floatingHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 4,
+    gap: 8,
+    zIndex: 3,
   },
-  backBtn: {
+  inputDock: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 3,
+  },
+  headerLeftCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  backPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingRight: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  backPillBtn: {
     width: 36,
     height: 36,
     justifyContent: "center",
     alignItems: "center",
   },
-  headerUser: {
+  backBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#111",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    marginRight: 4,
+  },
+  backBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+  },
+  headerCenterPill: {
     flex: 1,
+    minWidth: 0,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  headerName: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  headerStatus: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 1,
+    textAlign: "center",
+  },
+  headerRightCluster: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    minWidth: 0,
+    gap: 6,
   },
-  headerAvatarWrap: {
-    flexShrink: 0,
+  headerCircleBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  headerInfo: { flex: 1 },
-  headerName: { fontSize: 18, fontFamily: "Inter_700Bold" },
-  headerStatus: { fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 1 },
-  headerActions: { flexDirection: "row", gap: 2 },
-  actionBtn: { width: 36, height: 36, justifyContent: "center", alignItems: "center" },
-  messagesPane: {
-    flex: 1,
-    position: "relative",
-    overflow: "hidden",
-  },
-  messageListView: {
-    backgroundColor: "transparent",
+  headerAvatarRing: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 2.5,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
   messageList: {
-    paddingTop: 12,
     flexGrow: 1,
   },
   emptyChat: {

@@ -1,9 +1,10 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   NativeScrollEvent,
@@ -31,10 +32,15 @@ import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import {
   isArchivedAccessEnabled,
+  isArchivedStripPinned,
+  setArchivedStripPinned,
   verifyArchivedAccessPassword,
 } from "@/lib/archived-access";
 import { openGlobalSearch } from "@/lib/navigation";
 import { openUserStories } from "@/lib/story-playback";
+
+const ARCHIVED_PULL_REVEAL_OFFSET = 36;
+const ARCHIVED_SCROLL_HIDE_OFFSET = 10;
 
 export default function ChatsScreen() {
   const colors = useColors();
@@ -53,13 +59,19 @@ export default function ChatsScreen() {
     isLoadingChats,
     typingByConversation,
     isUserBlocked,
+    archiveConversation,
   } = useChats();
   const [search, setSearch] = useState("");
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [archivedUnlocked, setArchivedUnlocked] = useState(false);
   const [showArchivedPassword, setShowArchivedPassword] = useState(false);
   const [archivedAccessEnabled, setArchivedAccessEnabled] = useState(false);
+  const [archivedStripPinned, setArchivedStripPinnedState] = useState(false);
+  const [archivedStripVisible, setArchivedStripVisible] = useState(false);
+  const [archivedContentUnlocked, setArchivedContentUnlocked] = useState(false);
+  const archivedStripPinnedRef = useRef(false);
+  const pendingPinOnOpenRef = useRef(false);
+  const lastScrollYRef = useRef(0);
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerSearch, setComposerSearch] = useState("");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -117,24 +129,253 @@ export default function ChatsScreen() {
   useEffect(() => {
     if (!currentUserId) return;
     void isArchivedAccessEnabled(currentUserId).then(setArchivedAccessEnabled);
+    void isArchivedStripPinned(currentUserId).then((pinned) => {
+      archivedStripPinnedRef.current = pinned;
+      setArchivedStripPinnedState(pinned);
+      if (pinned) {
+        setArchivedStripVisible(true);
+      }
+    });
   }, [currentUserId]);
 
-  const requestArchivedAccess = () => {
+  useEffect(() => {
+    if (archivedChats.length > 0) return;
+    archivedStripPinnedRef.current = false;
+    setArchivedStripPinnedState(false);
+    setArchivedStripVisible(false);
+    setShowArchived(false);
+    if (currentUserId) {
+      void setArchivedStripPinned(currentUserId, false);
+    }
+  }, [archivedChats.length, currentUserId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!currentUserId) return;
+      void isArchivedAccessEnabled(currentUserId).then(setArchivedAccessEnabled);
+      void isArchivedStripPinned(currentUserId).then((pinned) => {
+        archivedStripPinnedRef.current = pinned;
+        setArchivedStripPinnedState(pinned);
+        if (pinned) {
+          setArchivedStripVisible(true);
+        }
+      });
+    }, [currentUserId]),
+  );
+
+  const pinArchivedStrip = useCallback(() => {
+    archivedStripPinnedRef.current = true;
+    setArchivedStripPinnedState(true);
+    setArchivedStripVisible(true);
+    if (currentUserId) {
+      void setArchivedStripPinned(currentUserId, true);
+    }
+  }, [currentUserId]);
+
+  const hideTransientArchivedStrip = useCallback(() => {
+    setArchivedStripVisible(false);
+    setShowArchived(false);
+    setArchivedContentUnlocked(false);
+    pendingPinOnOpenRef.current = false;
+  }, []);
+
+  const revealArchivedStrip = useCallback(
+    (expandContent: boolean) => {
+      setArchivedStripVisible(true);
+      if (!expandContent) return;
+      if (archivedAccessEnabled && !archivedContentUnlocked) return;
+      setShowArchived(true);
+    },
+    [archivedAccessEnabled, archivedContentUnlocked],
+  );
+
+  const handleListScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (search || archivedChats.length === 0) return;
+
+      const y = event.nativeEvent.contentOffset.y;
+      const delta = y - lastScrollYRef.current;
+      lastScrollYRef.current = y;
+
+      if (archivedStripPinnedRef.current) {
+        return;
+      }
+
+      // Tirer vers le bas (overscroll) : afficher la bande archivées.
+      if (y <= -ARCHIVED_PULL_REVEAL_OFFSET) {
+        revealArchivedStrip(!archivedAccessEnabled);
+        return;
+      }
+
+      // Android : pas d'overscroll négatif — détecter le geste vers le bas en haut de liste.
+      if (Platform.OS === "android" && y <= 0 && delta < -2) {
+        revealArchivedStrip(!archivedAccessEnabled);
+        return;
+      }
+
+      // Remonter la liste : refermer tant que la persistance forte n'est pas active.
+      if (archivedStripVisible && y >= ARCHIVED_SCROLL_HIDE_OFFSET && delta > 0) {
+        hideTransientArchivedStrip();
+      }
+    },
+    [archivedChats.length, archivedStripVisible, archivedAccessEnabled, hideTransientArchivedStrip, revealArchivedStrip, search],
+  );
+
+  const openArchivedAccess = useCallback(() => {
     if (archivedChats.length === 0) return;
-    if (archivedAccessEnabled && !archivedUnlocked) {
+    if (archivedAccessEnabled && !archivedContentUnlocked) {
       setShowArchivedPassword(true);
       return;
     }
     setShowArchived(true);
+    if (pendingPinOnOpenRef.current) {
+      pinArchivedStrip();
+      pendingPinOnOpenRef.current = false;
+    }
+  }, [archivedAccessEnabled, archivedChats.length, archivedContentUnlocked, pinArchivedStrip]);
+
+  const toggleArchivedAccess = () => {
+    if (showArchived) {
+      setShowArchived(false);
+      setArchivedContentUnlocked(false);
+      pendingPinOnOpenRef.current = false;
+      if (!archivedStripPinnedRef.current) {
+        hideTransientArchivedStrip();
+      }
+      return;
+    }
+    pendingPinOnOpenRef.current = true;
+    openArchivedAccess();
   };
 
-  const handleListScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (search || archivedChats.length === 0 || showArchived) return;
-    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-    const overflow = contentOffset.y + layoutMeasurement.height - contentSize.height;
-    if (overflow > 72) {
-      requestArchivedAccess();
+  const handleUnarchiveChat = (item: GChat) => {
+    const other = getOtherUser(item);
+    const label = item.type === "group" ? (item.name ?? "Groupe") : (other?.name ?? "Conversation");
+    Alert.alert(label, undefined, [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Désarchiver",
+        onPress: () => {
+          void archiveConversation(item.id, false);
+        },
+      },
+    ]);
+  };
+
+  const renderArchivedChatItem = (item: GChat) => {
+    const other = getOtherUser(item);
+    const lastMsg = messages[item.id]?.slice(-1)[0] ?? item.lastMessage;
+    return (
+      <ChatItem
+        key={item.id}
+        chat={item}
+        otherUser={other}
+        lastMessage={lastMsg}
+        currentUserId={currentUserId}
+        users={users}
+        onPress={() => router.push(`/chat/${item.id}`)}
+        onLongPress={() => handleUnarchiveChat(item)}
+      />
+    );
+  };
+
+  const renderStoriesSection = () => {
+    if (search || showArchived) return null;
+
+    return (
+      <View style={styles.storiesSection}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.storiesScroll}
+          nestedScrollEnabled
+        >
+          <StoryRing
+            user={meUser}
+            stories={myStories}
+            currentUserId={currentUserId}
+            isMe
+            onPress={() => {
+              if (myStories.length > 0) {
+                openUserStories({
+                  stories,
+                  users,
+                  targetUserId: currentUserId,
+                  currentUserId,
+                  includeQueue: false,
+                });
+                return;
+              }
+              handleOpenStatusComposer();
+            }}
+          />
+          {storyUsers.map((u) => (
+            <StoryRing
+              key={u.id}
+              user={u}
+              stories={stories.filter((s) => s.userId === u.id)}
+              currentUserId={currentUserId}
+              onPress={() => {
+                openUserStories({
+                  stories,
+                  users,
+                  targetUserId: u.id,
+                  currentUserId,
+                });
+              }}
+            />
+          ))}
+        </ScrollView>
+        <View style={[styles.storiesDivider, { backgroundColor: colors.border }]} />
+      </View>
+    );
+  };
+
+  const renderArchivedSection = () => {
+    const stripVisible = archivedStripPinned || archivedStripVisible;
+    const canShowArchivedContent =
+      showArchived && (!archivedAccessEnabled || archivedContentUnlocked);
+
+    if (archivedChats.length === 0 || search || !stripVisible) {
+      return null;
     }
+
+    return (
+      <View style={[styles.archivedSection, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          style={[styles.archivedEntry, { borderBottomColor: colors.border }]}
+          onPress={toggleArchivedAccess}
+          activeOpacity={0.82}
+        >
+          <View style={[styles.archivedEntryIcon, { backgroundColor: colors.muted }]}>
+            <Ionicons
+              name={archivedAccessEnabled && !archivedContentUnlocked ? "lock-closed-outline" : "archive-outline"}
+              size={18}
+              color={colors.primary}
+            />
+          </View>
+          <Text style={[styles.archivedEntryLabel, { color: colors.text }]}>
+            Conversations archivées
+          </Text>
+          <Text style={[styles.archivedEntryCount, { color: colors.mutedForeground }]}>
+            {archivedChats.length}
+          </Text>
+          <Ionicons
+            name={showArchived ? "chevron-up" : "chevron-down"}
+            size={18}
+            color={colors.mutedForeground}
+          />
+        </TouchableOpacity>
+        {archivedAccessEnabled && stripVisible && !archivedContentUnlocked ? (
+          <View style={styles.archivedLockedHint}>
+            <Text style={[styles.archivedLockedText, { color: colors.mutedForeground }]}>
+              Touchez pour saisir le mot de passe et afficher le contenu.
+            </Text>
+          </View>
+        ) : null}
+        {canShowArchivedContent ? archivedChats.map(renderArchivedChatItem) : null}
+      </View>
+    );
   };
 
   const totalUnread = chats.reduce((sum, c) => sum + c.unreadCount, 0);
@@ -251,83 +492,25 @@ export default function ChatsScreen() {
         </View>
       </View>
 
+      <SearchBar
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Rechercher..."
+        autoFocus={shouldFocusSearch}
+      />
+
+      {renderArchivedSection()}
+
       <FlatList
         data={filtered}
         keyExtractor={(c) => c.id}
-        scrollEnabled={!!filtered.length || isLoadingChats}
+        scrollEnabled
+        bounces
+        overScrollMode="always"
         onScroll={handleListScroll}
         scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: bottomPad + 96, flexGrow: 1 }}
-        ListHeaderComponent={
-          <>
-            <SearchBar
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Rechercher..."
-              autoFocus={shouldFocusSearch}
-            />
-
-            {!search && archivedChats.length > 0 && !showArchived ? (
-              <TouchableOpacity
-                style={[styles.archivedHint, { borderColor: colors.border }]}
-                onPress={requestArchivedAccess}
-                activeOpacity={0.82}
-              >
-                <Ionicons name="archive-outline" size={16} color={colors.mutedForeground} />
-                <Text style={[styles.archivedHintText, { color: colors.mutedForeground }]}>
-                  {archivedChats.length} archivée{archivedChats.length > 1 ? "s" : ""} · faites défiler vers le bas
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-
-            {!search && (
-              <View style={styles.storiesSection}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.storiesScroll}
-                >
-                  <StoryRing
-                    user={meUser}
-                    stories={myStories}
-                    currentUserId={currentUserId}
-                    isMe
-                    onPress={() => {
-                      if (myStories.length > 0) {
-                        openUserStories({
-                          stories,
-                          users,
-                          targetUserId: currentUserId,
-                          currentUserId,
-                          includeQueue: false,
-                        });
-                        return;
-                      }
-                      handleOpenStatusComposer();
-                    }}
-                  />
-                  {storyUsers.map((u) => (
-                    <StoryRing
-                      key={u.id}
-                      user={u}
-                      stories={stories.filter((s) => s.userId === u.id)}
-                      currentUserId={currentUserId}
-                      onPress={() => {
-                        openUserStories({
-                          stories,
-                          users,
-                          targetUserId: u.id,
-                          currentUserId,
-                        });
-                      }}
-                    />
-                  ))}
-                </ScrollView>
-                <View style={[styles.storiesDivider, { backgroundColor: colors.border }]} />
-              </View>
-            )}
-          </>
-        }
+        ListHeaderComponent={renderStoriesSection()}
         renderItem={({ item }) => {
           const other = getOtherUser(item);
           const lastMsg = messages[item.id]?.slice(-1)[0] ?? item.lastMessage;
@@ -377,53 +560,19 @@ export default function ChatsScreen() {
             </Text>
           </View>
         }
-        ListFooterComponent={
-          showArchived && archivedChats.length > 0 ? (
-            <View style={styles.archivedSection}>
-              <View style={styles.archivedHeaderRow}>
-                <Text style={[styles.archivedTitle, { color: colors.mutedForeground }]}>
-                  Conversations archivées
-                </Text>
-                <TouchableOpacity onPress={() => setShowArchived(false)} activeOpacity={0.82}>
-                  <Text style={[styles.archivedHide, { color: colors.primary }]}>Masquer</Text>
-                </TouchableOpacity>
-              </View>
-              {archivedChats.map((item) => {
-                const other = getOtherUser(item);
-                const lastMsg = messages[item.id]?.slice(-1)[0] ?? item.lastMessage;
-                return (
-                  <ChatItem
-                    key={item.id}
-                    chat={item}
-                    otherUser={other}
-                    lastMessage={lastMsg}
-                    currentUserId={currentUserId}
-                    users={users}
-                    onPress={() => router.push(`/chat/${item.id}`)}
-                  />
-                );
-              })}
-            </View>
-          ) : null
-        }
       />
 
       <ChatOptionsSheet
         visible={showHeaderMenu}
         onClose={() => setShowHeaderMenu(false)}
         title="Options"
+        subtitle="Actions sur vos discussions"
         options={[
           {
             key: "search",
             label: "Rechercher",
             icon: "search-outline",
             onPress: () => openGlobalSearch(),
-          },
-          {
-            key: "archived",
-            label: "Conversations archivées",
-            icon: "archive-outline",
-            onPress: requestArchivedAccess,
           },
         ]}
       />
@@ -432,12 +581,17 @@ export default function ChatsScreen() {
         visible={showArchivedPassword}
         title="Accès aux archivées"
         description="Entrez votre mot de passe pour afficher les conversations archivées."
+        icon={require("@/assets/images/archived-password.png")}
         onClose={() => setShowArchivedPassword(false)}
         onSubmit={async (password) => {
           const ok = await verifyArchivedAccessPassword(currentUserId, password);
           if (ok) {
-            setArchivedUnlocked(true);
+            setArchivedContentUnlocked(true);
             setShowArchived(true);
+            if (pendingPinOnOpenRef.current) {
+              pinArchivedStrip();
+              pendingPinOnOpenRef.current = false;
+            }
           }
           return ok;
         }}
@@ -615,8 +769,8 @@ const styles = StyleSheet.create({
   storiesSection: { marginTop: 4 },
   storiesScroll: {
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
+    paddingVertical: 10,
+    gap: 12,
   },
   storiesDivider: { height: StyleSheet.hairlineWidth },
   empty: {
@@ -741,40 +895,42 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   createBtnText: { fontSize: 16, fontFamily: "Inter_600SemiBold" },
-  archivedHint: {
+  archivedEntry: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  archivedHintText: {
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   archivedSection: {
-    marginTop: 8,
-    paddingTop: 8,
+    backgroundColor: "transparent",
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  archivedHeaderRow: {
-    flexDirection: "row",
+  archivedEntryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    justifyContent: "center",
   },
-  archivedTitle: {
-    fontSize: 13,
+  archivedEntryLabel: {
+    flex: 1,
+    fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
   },
-  archivedHide: {
+  archivedEntryCount: {
     fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
+    fontFamily: "Inter_500Medium",
+    marginRight: 2,
+  },
+  archivedLockedHint: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  archivedLockedText: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 18,
   },
 });

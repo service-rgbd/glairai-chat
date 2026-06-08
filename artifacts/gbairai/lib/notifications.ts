@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 
 import { setIncomingCall } from "@/lib/incoming-call";
+import { shouldAcceptIncomingCall } from "@/lib/call-session-client";
 import { isExpoGo } from "@/lib/runtime-env";
 
 let notificationHandlerConfigured = false;
@@ -33,6 +34,7 @@ function isIncomingCallPushData(data: unknown): data is IncomingCallPushData {
 }
 
 function showIncomingCallOverlay(data: IncomingCallPushData) {
+  if (!shouldAcceptIncomingCall(data.callId)) return;
   setIncomingCall({
     callId: data.callId,
     conversationId: data.conversationId,
@@ -145,6 +147,21 @@ export async function registerForPushNotificationsAsync() {
       bypassDnd: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
+  }
+
+  if (Platform.OS === "ios") {
+    await Notifications.setNotificationCategoryAsync("incoming_call", [
+      {
+        identifier: "accept_call",
+        buttonTitle: "Répondre",
+        options: { opensAppToForeground: true },
+      },
+      {
+        identifier: "decline_call",
+        buttonTitle: "Refuser",
+        options: { opensAppToForeground: true, isDestructive: true },
+      },
+    ]);
   }
 
   try {

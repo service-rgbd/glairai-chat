@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo } from "react";
-import { Platform, SectionList, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, SectionList, StyleSheet, Text, TouchableOpacity, View, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CallItem } from "@/components/CallItem";
@@ -10,6 +10,7 @@ import { MOCK_CALLS } from "@/lib/mock-calls";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import { buildCallHistorySections } from "@/lib/call-history";
+import { assertCanStartCall } from "@/lib/call-session-client";
 import { openGlobalSearch } from "@/lib/navigation";
 
 export default function CallsScreen() {
@@ -30,6 +31,12 @@ export default function CallsScreen() {
 
   const handleCallPress = (call: (typeof displayedCalls)[number]) => {
     if (!call.conversationId) return;
+    try {
+      assertCanStartCall(call.conversationId);
+    } catch {
+      Alert.alert("Occupé", "Terminez l'appel en cours avant d'en lancer un autre.");
+      return;
+    }
     const nextCallId = isAuthenticated
       ? startOutgoingCall({
           userId: call.userId,

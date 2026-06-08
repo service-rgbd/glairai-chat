@@ -802,7 +802,8 @@ export const SyncContactsResponse = zod.object({
 export const RegisterDeviceTokenBody = zod.object({
   "pushToken": zod.string(),
   "platform": zod.string(),
-  "deviceName": zod.string()
+  "deviceName": zod.string(),
+  "voipPushToken": zod.string().optional()
 })
 
 export const RegisterDeviceTokenResponse = zod.object({

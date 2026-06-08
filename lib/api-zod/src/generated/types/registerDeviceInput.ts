@@ -10,4 +10,5 @@ export interface RegisterDeviceInput {
   pushToken: string;
   platform: string;
   deviceName: string;
+  voipPushToken?: string;
 }

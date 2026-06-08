@@ -1,8 +1,9 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
+import { Image, type ImageSource } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Platform,
   ScrollView,
@@ -13,39 +14,189 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { Avatar } from "@/components/Avatar";
 import { PasswordPromptModal } from "@/components/PasswordPromptModal";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChats } from "@/contexts/chats-context-ref";
-import { useCallRingtone, CALL_RINGTONES } from "@/lib/call-ringtone";
+import { useChatWallpaper } from "@/hooks/useChatWallpaper";
+import { useColors } from "@/hooks/useColors";
 import {
   clearArchivedAccessPassword,
   isArchivedAccessEnabled,
   setArchivedAccessPassword,
   verifyArchivedAccessPassword,
 } from "@/lib/archived-access";
-import { useChatWallpaper } from "@/hooks/useChatWallpaper";
-import { useColors } from "@/hooks/useColors";
+import { useCallRingtone, CALL_RINGTONES } from "@/lib/call-ringtone";
 import { getLocalDbStats } from "@/lib/local-db";
 import { getMediaCacheStats } from "@/lib/media-cache";
 import { purgeOfflineCacheForUser } from "@/lib/offline-cache";
 import { queryClient } from "@/lib/query-client";
+import { SETTINGS_ICONS, type SettingsIconKey } from "@/lib/settings-icons";
 
-interface SettingSwitchRowProps {
-  label: string;
-  value?: string;
-  enabled: boolean;
-  onToggle: (value: boolean) => void;
+type IconName = keyof typeof Ionicons.glyphMap;
+
+function SettingsIcon({
+  image,
+  sprite,
+  ionIcon,
+  ionColor,
+}: {
+  image?: ImageSource;
+  sprite?: { source: ImageSource; column: number; row: number; columns?: number; rows?: number };
+  ionIcon?: IconName;
+  ionColor?: string;
+}) {
+  const colors = useColors();
+  const cellSize = 28;
+
+  if (image) {
+    return <Image source={image} style={styles.settingsIconImage} contentFit="contain" />;
+  }
+
+  if (sprite) {
+    const columns = sprite.columns ?? 2;
+    const rows = sprite.rows ?? 4;
+    return (
+      <View style={styles.spriteClip}>
+        <Image
+          source={sprite.source}
+          style={{
+            width: cellSize * columns,
+            height: cellSize * rows,
+            transform: [{ translateX: -sprite.column * cellSize }, { translateY: -sprite.row * cellSize }],
+          }}
+          contentFit="cover"
+        />
+      </View>
+    );
+  }
+
+  if (ionIcon) {
+    return <Ionicons name={ionIcon} size={20} color={ionColor ?? colors.primary} />;
+  }
+
+  return null;
 }
 
-function SettingSwitchRow({ label, value, enabled, onToggle }: SettingSwitchRowProps) {
+function SettingsGroup({ children }: { children: React.ReactNode }) {
   const colors = useColors();
   return (
-    <View style={[styles.row, { borderBottomColor: colors.border }]}>
-      <View style={styles.rowContent}>
+    <View style={[styles.groupCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {children}
+    </View>
+  );
+}
+
+function SettingsRow({
+  label,
+  value,
+  iconKey,
+  image,
+  sprite,
+  ionIcon,
+  destructive,
+  trailing,
+  onPress,
+  isLast,
+}: {
+  label: string;
+  value?: string;
+  iconKey?: SettingsIconKey;
+  image?: ImageSource;
+  sprite?: { source: ImageSource; column: number; row: number; columns?: number; rows?: number };
+  ionIcon?: IconName;
+  destructive?: boolean;
+  trailing?: React.ReactNode;
+  onPress?: () => void;
+  isLast?: boolean;
+}) {
+  const colors = useColors();
+  const iconImage = iconKey ? SETTINGS_ICONS[iconKey] : image;
+  const iconBoxStyle = sprite
+    ? [styles.iconBox, styles.iconBoxSprite]
+    : [styles.iconBox, { backgroundColor: colors.muted }];
+  const content = (
+    <>
+      <View style={iconBoxStyle}>
+        <SettingsIcon image={iconImage} sprite={sprite} ionIcon={ionIcon} ionColor={destructive ? colors.destructive : colors.primary} />
+      </View>
+      <View style={styles.rowBody}>
+        <Text style={[styles.rowLabel, { color: destructive ? colors.destructive : colors.text }]}>
+          {label}
+        </Text>
+        {value ? (
+          <Text style={[styles.rowValue, { color: colors.mutedForeground }]} numberOfLines={2}>
+            {value}
+          </Text>
+        ) : null}
+      </View>
+      {trailing ?? (
+        onPress ? <Feather name="chevron-right" size={18} color={colors.mutedForeground} /> : null
+      )}
+    </>
+  );
+
+  if (!onPress) {
+    return (
+      <View style={[styles.row, !isLast && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+        {content}
+      </View>
+    );
+  }
+
+  return (
+    <TouchableOpacity
+      style={[styles.row, !isLast && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}
+      onPress={onPress}
+      activeOpacity={0.72}
+    >
+      {content}
+    </TouchableOpacity>
+  );
+}
+
+function SettingsSwitchRow({
+  label,
+  value,
+  iconKey,
+  image,
+  sprite,
+  ionIcon,
+  enabled,
+  onToggle,
+  isLast,
+}: {
+  label: string;
+  value?: string;
+  iconKey?: SettingsIconKey;
+  image?: ImageSource;
+  sprite?: { source: ImageSource; column: number; row: number; columns?: number; rows?: number };
+  ionIcon?: IconName;
+  enabled: boolean;
+  onToggle: (value: boolean) => void;
+  isLast?: boolean;
+}) {
+  const colors = useColors();
+  const iconImage = iconKey ? SETTINGS_ICONS[iconKey] : image;
+  const iconBoxStyle = sprite
+    ? [styles.iconBox, styles.iconBoxSprite]
+    : [styles.iconBox, { backgroundColor: colors.muted }];
+  return (
+    <View
+      style={[styles.row, !isLast && { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}
+    >
+      <View style={iconBoxStyle}>
+        <SettingsIcon image={iconImage} sprite={sprite} ionIcon={ionIcon} />
+      </View>
+      <View style={styles.rowBody}>
         <Text style={[styles.rowLabel, { color: colors.text }]}>{label}</Text>
-        {value && <Text style={[styles.rowValue, { color: colors.mutedForeground }]}>{value}</Text>}
+        {value ? (
+          <Text style={[styles.rowValue, { color: colors.mutedForeground }]} numberOfLines={2}>
+            {value}
+          </Text>
+        ) : null}
       </View>
       <Switch
         value={enabled}
@@ -93,6 +244,9 @@ export default function SettingsScreen() {
   const [showSetArchivePassword, setShowSetArchivePassword] = useState(false);
   const [showRemoveArchivePassword, setShowRemoveArchivePassword] = useState(false);
 
+  const initials = (currentUser?.name ?? "U").slice(0, 2).toUpperCase();
+  const avatarColor = "#FF6B35";
+
   useEffect(() => {
     if (!currentUser?.id) return;
     void isArchivedAccessEnabled(currentUser.id).then(setArchivedPasswordEnabled);
@@ -104,25 +258,38 @@ export default function SettingsScreen() {
     setDraftAvatar(currentUser?.avatar ?? null);
   }, [currentUser?.avatar, currentUser?.bio, currentUser?.name]);
 
-  const visibilityOptions = useMemo(
-    () => ["everyone", "contacts", "nobody"] as const,
-    [],
-  );
-  const fontScaleOptions = useMemo(
-    () => ["small", "medium", "large"] as const,
-    [],
-  );
+  const visibilityOptions = useMemo(() => ["everyone", "contacts", "nobody"] as const, []);
+  const fontScaleOptions = useMemo(() => ["small", "medium", "large"] as const, []);
+
+  const lastSeenLabel =
+    currentUser?.settings.lastSeenVisibility === "everyone"
+      ? "Tout le monde"
+      : currentUser?.settings.lastSeenVisibility === "contacts"
+        ? "Mes contacts"
+        : "Personne";
+
+  const fontScaleLabel =
+    currentUser?.settings.chatFontScale === "small"
+      ? "Petite"
+      : currentUser?.settings.chatFontScale === "large"
+        ? "Grande"
+        : "Moyenne";
 
   const handleLogout = () => {
     Alert.alert("Déconnexion", "Voulez-vous vraiment vous déconnecter?", [
       { text: "Annuler", style: "cancel" },
-      { text: "Déconnecter", style: "destructive", onPress: async () => { await logout(); router.replace("/(auth)/welcome"); } },
+      {
+        text: "Déconnecter",
+        style: "destructive",
+        onPress: async () => {
+          await logout();
+          router.replace("/(auth)/welcome");
+        },
+      },
     ]);
   };
 
-  const patchSettings = async (
-    updates: Partial<NonNullable<typeof currentUser>["settings"]>,
-  ) => {
+  const patchSettings = async (updates: Partial<NonNullable<typeof currentUser>["settings"]>) => {
     if (!currentUser) return;
     try {
       await updateProfile({
@@ -138,9 +305,7 @@ export default function SettingsScreen() {
 
   const cycleLastSeenVisibility = async () => {
     if (!currentUser) return;
-    const currentIndex = visibilityOptions.indexOf(
-      currentUser.settings.lastSeenVisibility,
-    );
+    const currentIndex = visibilityOptions.indexOf(currentUser.settings.lastSeenVisibility);
     const nextValue = visibilityOptions[(currentIndex + 1) % visibilityOptions.length];
     await patchSettings({ lastSeenVisibility: nextValue });
   };
@@ -173,201 +338,225 @@ export default function SettingsScreen() {
     }
   };
 
+  const openArchivePasswordSettings = () => {
+    if (archivedPasswordEnabled) {
+      Alert.alert("Mot de passe archivées", "Que souhaitez-vous faire ?", [
+        { text: "Annuler", style: "cancel" },
+        { text: "Modifier", onPress: () => setShowSetArchivePassword(true) },
+        {
+          text: "Désactiver",
+          style: "destructive",
+          onPress: () => setShowRemoveArchivePassword(true),
+        },
+      ]);
+      return;
+    }
+    setShowSetArchivePassword(true);
+  };
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 6, borderBottomColor: colors.border, backgroundColor: colors.headerBg }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Réglages</Text>
-        <View style={[styles.statusPill, { backgroundColor: socketConnected ? colors.primary : colors.muted }]}>
-          <Text style={styles.statusPillText}>{socketConnected ? "Connecté" : "Hors ligne"}</Text>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingTop: topPad + 8, paddingBottom: bottomPad + 96 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.topBar}>
+          <TouchableOpacity style={[styles.gridBtn, { backgroundColor: colors.card, borderColor: colors.border }]} activeOpacity={0.75}>
+            <Image source={SETTINGS_ICONS.menuGrid} style={styles.gridIcon} contentFit="contain" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.editPill, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={() => setEditingProfile((value) => !value)}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.editPillText, { color: colors.primary }]}>
+              {editingProfile ? "Fermer" : "Modifier"}
+            </Text>
+          </TouchableOpacity>
         </View>
-      </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: bottomPad + 96 }}>
-        <View style={[styles.profileBlock, { borderBottomColor: colors.border }]}>
-          <View style={styles.profileHeader}>
-            <View style={styles.profileIdentity}>
-              <Avatar
-                uri={currentUser?.avatar}
-                initials={(currentUser?.name ?? "U").slice(0, 2).toUpperCase()}
-                color="#6D4AFF"
-                size={68}
-              />
-              <View style={styles.profileText}>
-              <Text style={[styles.profileName, { color: colors.text }]}>
-                {currentUser?.name || "Utilisateur"}
-              </Text>
-              <Text style={[styles.profileMeta, { color: colors.mutedForeground }]}>
-                {currentUser?.phone}
-              </Text>
-              <Text style={[styles.profileMeta, { color: colors.mutedForeground }]}>
-                {currentUser?.statusText || currentUser?.bio || "Disponible"}
-              </Text>
-              </View>
-            </View>
-            <TouchableOpacity onPress={() => setEditingProfile((value) => !value)} activeOpacity={0.7}>
-              <Text style={[styles.actionText, { color: colors.primary }]}>
-                {editingProfile ? "Fermer" : "Modifier"}
-              </Text>
-            </TouchableOpacity>
+        <View style={styles.profileHero}>
+          <View style={styles.avatarWrap}>
+            {currentUser?.avatar ? (
+              <Avatar uri={currentUser.avatar} initials={initials} color={avatarColor} size={96} />
+            ) : (
+              <LinearGradient
+                colors={["#FF8A4C", "#FF3D71"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.avatarGradient}
+              >
+                <Text style={styles.avatarInitials}>{initials}</Text>
+              </LinearGradient>
+            )}
           </View>
-
-          {editingProfile ? (
-            <ProfileEditor
-              name={draftName}
-              bio={draftBio}
-              avatar={draftAvatar}
-              loading={loadingProfile}
-              submitLabel="Enregistrer"
-              onChangeName={setDraftName}
-              onChangeBio={setDraftBio}
-              onChangeAvatar={setDraftAvatar}
-              onSubmit={saveProfile}
-            />
-          ) : null}
-        </View>
-
-        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Confidentialité</Text>
-        <TouchableOpacity style={[styles.row, { borderBottomColor: colors.border }]} onPress={cycleLastSeenVisibility} activeOpacity={0.7}>
-          <View style={styles.rowContent}>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Dernière connexion</Text>
-            <Text style={[styles.rowValue, { color: colors.mutedForeground }]}>
-              {currentUser?.settings.lastSeenVisibility === "everyone"
-                ? "Tout le monde"
-                : currentUser?.settings.lastSeenVisibility === "contacts"
-                  ? "Mes contacts"
-                  : "Personne"}
+          <Text style={[styles.profileName, { color: colors.text }]}>{currentUser?.name || "Utilisateur"}</Text>
+          <Text style={[styles.profilePhone, { color: colors.mutedForeground }]}>{currentUser?.phone}</Text>
+          <View style={[styles.statusChip, { backgroundColor: socketConnected ? `${colors.primary}18` : colors.muted }]}>
+            <View style={[styles.statusDot, { backgroundColor: socketConnected ? colors.online : colors.mutedForeground }]} />
+            <Text style={[styles.statusChipText, { color: socketConnected ? colors.primary : colors.mutedForeground }]}>
+              {socketConnected ? "En ligne" : "Hors ligne"}
             </Text>
           </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </TouchableOpacity>
-        <SettingSwitchRow
-          label="Accusés de lecture"
-          value="Afficher quand vos messages sont lus"
-          enabled={currentUser?.settings.readReceiptsEnabled ?? true}
-          onToggle={(value) => void patchSettings({ readReceiptsEnabled: value })}
-        />
+        </View>
 
-        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Notifications</Text>
-        <SettingSwitchRow
-          label="Notifications push"
-          enabled={currentUser?.settings.notificationsEnabled ?? true}
-          onToggle={(value) => void patchSettings({ notificationsEnabled: value })}
-        />
-        <SettingSwitchRow
-          label="Son"
-          enabled={currentUser?.settings.notificationSoundEnabled ?? true}
-          onToggle={(value) => void patchSettings({ notificationSoundEnabled: value })}
-        />
-        <SettingSwitchRow
-          label="Vibration"
-          enabled={currentUser?.settings.vibrationEnabled ?? true}
-          onToggle={(value) => void patchSettings({ vibrationEnabled: value })}
-        />
+        {editingProfile ? (
+          <SettingsGroup>
+            <View style={styles.editorWrap}>
+              <ProfileEditor
+                name={draftName}
+                bio={draftBio}
+                avatar={draftAvatar}
+                loading={loadingProfile}
+                submitLabel="Enregistrer"
+                onChangeName={setDraftName}
+                onChangeBio={setDraftBio}
+                onChangeAvatar={setDraftAvatar}
+                onSubmit={saveProfile}
+              />
+            </View>
+          </SettingsGroup>
+        ) : (
+          <SettingsGroup>
+            <SettingsRow
+              label="Définir une photo de profil"
+              iconKey="profilePhoto"
+              onPress={() => setEditingProfile(true)}
+            />
+            <SettingsRow
+              label="Modifier le profil"
+              iconKey="editProfile"
+              onPress={() => setEditingProfile(true)}
+              isLast
+            />
+          </SettingsGroup>
+        )}
 
-        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Discussions et données</Text>
-        <TouchableOpacity
-          style={[styles.row, { borderBottomColor: colors.border }]}
-          onPress={() => {
-            if (archivedPasswordEnabled) {
-              Alert.alert("Mot de passe archivées", "Que souhaitez-vous faire ?", [
+        <SettingsGroup>
+          <SettingsRow
+            label="Mon profil"
+            value={currentUser?.bio || currentUser?.statusText || "Disponible"}
+            iconKey="profile"
+            onPress={() => setEditingProfile(true)}
+          />
+          <SettingsRow
+            label="Appels récents"
+            iconKey="calls"
+            onPress={() => router.push("/(tabs)/(main)/calls")}
+          />
+          <SettingsRow
+            label="Arrière-plan du chat"
+            value={wallpaper.label}
+            iconKey="wallpaper"
+            onPress={() => router.push("/(tabs)/chat-wallpaper")}
+          />
+          <SettingsRow
+            label="Sonnerie d'appel"
+            value={ringtone.label}
+            iconKey="ringtone"
+            onPress={() => void cycleRingtone()}
+            isLast
+          />
+        </SettingsGroup>
+
+        <SettingsGroup>
+          <SettingsRow
+            label="Dernière connexion"
+            value={lastSeenLabel}
+            iconKey="lastSeen"
+            onPress={() => void cycleLastSeenVisibility()}
+          />
+          <SettingsSwitchRow
+            label="Accusés de lecture"
+            value="Afficher quand vos messages sont lus"
+            iconKey="readReceipts"
+            enabled={currentUser?.settings.readReceiptsEnabled ?? true}
+            onToggle={(value) => void patchSettings({ readReceiptsEnabled: value })}
+          />
+          <SettingsSwitchRow
+            label="Notifications push"
+            iconKey="bell"
+            enabled={currentUser?.settings.notificationsEnabled ?? true}
+            onToggle={(value) => void patchSettings({ notificationsEnabled: value })}
+          />
+          <SettingsSwitchRow
+            label="Son"
+            iconKey="ringtone"
+            enabled={currentUser?.settings.notificationSoundEnabled ?? true}
+            onToggle={(value) => void patchSettings({ notificationSoundEnabled: value })}
+          />
+          <SettingsSwitchRow
+            label="Vibration"
+            iconKey="vibration"
+            enabled={currentUser?.settings.vibrationEnabled ?? true}
+            onToggle={(value) => void patchSettings({ vibrationEnabled: value })}
+          />
+          <SettingsRow
+            label="Mot de passe des archivées"
+            value={archivedPasswordEnabled ? "Activé" : "Désactivé"}
+            iconKey="lock"
+            onPress={openArchivePasswordSettings}
+            isLast
+          />
+        </SettingsGroup>
+
+        <SettingsGroup>
+          <SettingsSwitchRow
+            label="Téléchargement automatique"
+            iconKey="download"
+            enabled={currentUser?.settings.autoDownloadMedia ?? true}
+            onToggle={(value) => void patchSettings({ autoDownloadMedia: value })}
+          />
+          <SettingsSwitchRow
+            label="Mode économie de données"
+            iconKey="wifi"
+            enabled={currentUser?.settings.lowDataMode ?? false}
+            onToggle={(value) => void patchSettings({ lowDataMode: value })}
+          />
+          <SettingsRow
+            label="Taille du texte"
+            value={fontScaleLabel}
+            iconKey="textSize"
+            onPress={() => void cycleFontScale()}
+          />
+          <SettingsRow
+            label="Vider le cache"
+            value={
+              cacheStats.conversations > 0 || cacheStats.messages > 0 || cacheStats.mediaFiles > 0
+                ? `${cacheStats.conversations} discussions · ${cacheStats.messages} messages · ${cacheStats.mediaFiles} média(s) (${cacheStats.mediaMb} Mo)`
+                : "Conversations, messages et médias locaux"
+            }
+            iconKey="download"
+            destructive
+            onPress={() => {
+              Alert.alert("Vider le cache", "Supprimer les données locales ?", [
                 { text: "Annuler", style: "cancel" },
                 {
-                  text: "Modifier",
-                  onPress: () => setShowSetArchivePassword(true),
-                },
-                {
-                  text: "Désactiver",
+                  text: "Vider",
                   style: "destructive",
-                  onPress: () => setShowRemoveArchivePassword(true),
+                  onPress: async () => {
+                    if (!currentUser?.id) return;
+                    await purgeOfflineCacheForUser(currentUser.id);
+                    queryClient.clear();
+                    setCacheStats({ mediaFiles: 0, mediaMb: 0, conversations: 0, messages: 0 });
+                    Alert.alert("Cache vidé", "Conversations, messages et médias locaux ont été réinitialisés.");
+                  },
                 },
               ]);
-              return;
-            }
-            setShowSetArchivePassword(true);
-          }}
-          activeOpacity={0.7}
-        >
-          <View style={styles.rowContent}>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Mot de passe des archivées</Text>
-            <Text style={[styles.rowValue, { color: colors.mutedForeground }]}>
-              {archivedPasswordEnabled ? "Activé" : "Désactivé"}
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </TouchableOpacity>
-        <SettingSwitchRow
-          label="Téléchargement automatique"
-          enabled={currentUser?.settings.autoDownloadMedia ?? true}
-          onToggle={(value) => void patchSettings({ autoDownloadMedia: value })}
-        />
-        <SettingSwitchRow
-          label="Mode économie de données"
-          enabled={currentUser?.settings.lowDataMode ?? false}
-          onToggle={(value) => void patchSettings({ lowDataMode: value })}
-        />
-        <TouchableOpacity style={[styles.row, { borderBottomColor: colors.border }]} onPress={cycleFontScale} activeOpacity={0.7}>
-          <View style={styles.rowContent}>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Taille du texte</Text>
-            <Text style={[styles.rowValue, { color: colors.mutedForeground }]}>
-              {currentUser?.settings.chatFontScale === "small"
-                ? "Petite"
-                : currentUser?.settings.chatFontScale === "large"
-                  ? "Grande"
-                  : "Moyenne"}
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.row, { borderBottomColor: colors.border }]}
-          onPress={() => router.push("/(tabs)/chat-wallpaper")}
-          activeOpacity={0.7}
-        >
-          <View style={styles.rowContent}>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Arrière-plan du chat</Text>
-            <Text style={[styles.rowValue, { color: colors.mutedForeground }]}>{wallpaper.label}</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.row, { borderBottomColor: colors.border }]}
-          onPress={() => void cycleRingtone()}
-          activeOpacity={0.7}
-        >
-          <View style={styles.rowContent}>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Sonnerie d'appel</Text>
-            <Text style={[styles.rowValue, { color: colors.mutedForeground }]}>{ringtone.label}</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </TouchableOpacity>
+            }}
+            isLast
+          />
+        </SettingsGroup>
 
-        <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>Contacts et cache</Text>
-        <TouchableOpacity
-          style={[styles.row, { borderBottomColor: colors.border }]}
-          onPress={async () => {
-            if (!currentUser?.id) return;
-            await purgeOfflineCacheForUser(currentUser.id);
-            queryClient.clear();
-            setCacheStats({ mediaFiles: 0, mediaMb: 0, conversations: 0, messages: 0 });
-            Alert.alert("Cache vidé", "Conversations, messages et médias locaux ont été réinitialisés.");
-          }}
-          activeOpacity={0.7}
-        >
-          <View style={styles.rowContent}>
-            <Text style={[styles.rowLabel, { color: colors.text }]}>Vider le cache</Text>
-            <Text style={[styles.rowValue, { color: colors.mutedForeground }]}>
-              {cacheStats.conversations > 0 || cacheStats.messages > 0 || cacheStats.mediaFiles > 0
-                ? `${cacheStats.conversations} discussions · ${cacheStats.messages} messages · ${cacheStats.mediaFiles} média(s) (${cacheStats.mediaMb} Mo)`
-                : "Conversations, messages et médias locaux"}
-            </Text>
-          </View>
-          <Ionicons name="trash-outline" size={20} color={colors.destructive} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.logoutRow, { borderBottomColor: colors.border }]} onPress={handleLogout} activeOpacity={0.7}>
-          <Ionicons name="log-out-outline" size={20} color={colors.destructive} />
-          <Text style={[styles.logoutText, { color: colors.destructive }]}>Déconnexion</Text>
-        </TouchableOpacity>
+        <SettingsGroup>
+          <SettingsRow
+            label="Déconnexion"
+            iconKey="logout"
+            destructive
+            onPress={handleLogout}
+            isLast
+          />
+        </SettingsGroup>
 
         <Text style={[styles.version, { color: colors.mutedForeground }]}>Gbairai v1.0.0</Text>
       </ScrollView>
@@ -377,6 +566,7 @@ export default function SettingsScreen() {
         title="Mot de passe des archivées"
         description="Choisissez un mot de passe pour protéger l'accès aux conversations archivées."
         confirmLabel="Enregistrer"
+        icon={require("@/assets/images/archived-password.png")}
         onClose={() => setShowSetArchivePassword(false)}
         onSubmit={async (password) => {
           if (!currentUser?.id) return false;
@@ -399,6 +589,7 @@ export default function SettingsScreen() {
         title="Désactiver le mot de passe"
         description="Entrez votre mot de passe actuel pour désactiver la protection."
         confirmLabel="Désactiver"
+        icon={require("@/assets/images/archived-password.png")}
         onClose={() => setShowRemoveArchivePassword(false)}
         onSubmit={async (password) => {
           if (!currentUser?.id) return false;
@@ -415,71 +606,143 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  headerTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
-  statusPill: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  statusPillText: { color: "#fff", fontSize: 12, fontFamily: "Inter_600SemiBold" },
-  profileBlock: {
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 16,
-  },
-  profileHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  profileIdentity: {
-    flexDirection: "row",
-    alignItems: "center",
+  scrollContent: {
+    paddingHorizontal: 16,
     gap: 14,
-    flex: 1,
   },
-  profileText: { flex: 1 },
-  profileName: { fontSize: 17, fontFamily: "Inter_600SemiBold" },
-  profileMeta: { fontSize: 13.5, fontFamily: "Inter_400Regular", marginTop: 3 },
-  actionText: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  sectionTitle: {
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 8,
-    fontSize: 12,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  gridBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  gridIcon: {
+    width: 22,
+    height: 22,
+  },
+  editPill: {
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  editPillText: {
+    fontSize: 15,
     fontFamily: "Inter_600SemiBold",
+  },
+  profileHero: {
+    alignItems: "center",
+    paddingVertical: 8,
+    marginBottom: 4,
+    gap: 6,
+  },
+  avatarWrap: {
+    marginBottom: 6,
+  },
+  avatarGradient: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarInitials: {
+    color: "#FFFFFF",
+    fontSize: 34,
+    fontFamily: "Inter_700Bold",
+  },
+  profileName: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  profilePhone: {
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
+  statusChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginTop: 4,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusChipText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  groupCard: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    gap: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 52,
   },
-  rowContent: { flex: 1 },
-  rowLabel: { fontSize: 15.5, fontFamily: "Inter_400Regular" },
-  rowValue: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
-  logoutRow: {
-    flexDirection: "row",
+  iconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    overflow: "hidden",
   },
-  logoutText: { fontSize: 15.5, fontFamily: "Inter_500Medium" },
-  version: { textAlign: "center", fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 8 },
+  settingsIconImage: {
+    width: 28,
+    height: 28,
+  },
+  spriteClip: {
+    width: 28,
+    height: 28,
+    overflow: "hidden",
+  },
+  iconBoxSprite: {
+    backgroundColor: "#1C1C1E",
+  },
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rowLabel: {
+    fontSize: 16,
+    fontFamily: "Inter_400Regular",
+  },
+  rowValue: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  editorWrap: {
+    padding: 14,
+  },
+  version: {
+    textAlign: "center",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 4,
+    marginBottom: 8,
+  },
 });

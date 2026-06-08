@@ -24,6 +24,13 @@ export function setIncomingCall(call: IncomingCallPayload | null) {
     for (const listener of uiModeListeners) {
       listener(uiMode);
     }
+    void import("@/lib/call-system-ui").then(({ displayNativeIncomingCall }) => {
+      displayNativeIncomingCall(call);
+    });
+  } else {
+    void import("@/lib/call-system-ui").then(({ endAllNativeCalls }) => {
+      endAllNativeCalls();
+    });
   }
   for (const listener of listeners) {
     listener(pendingCall);

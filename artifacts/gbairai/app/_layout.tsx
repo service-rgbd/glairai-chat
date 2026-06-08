@@ -18,6 +18,7 @@ import { isExpoGo } from "@/lib/runtime-env";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { IncomingCallOverlay } from "@/components/IncomingCallOverlay";
+import { NativeCallController } from "@/components/NativeCallController";
 import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatsProvider } from "@/contexts/ChatsContext";
@@ -98,6 +99,7 @@ export default function RootLayout() {
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <AppShell>
                     <IncomingCallOverlay />
+                    <NativeCallController />
                     <RootStack />
                   </AppShell>
                 </GestureHandlerRootView>

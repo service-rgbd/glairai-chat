@@ -20,6 +20,14 @@ export const lastSeenVisibilityEnum = pgEnum("last_seen_visibility", [
 ]);
 export const chatFontScaleEnum = pgEnum("chat_font_scale", ["small", "medium", "large"]);
 export const storyTypeEnum = pgEnum("story_type", ["text", "image", "video"]);
+export const callSessionStatusEnum = pgEnum("call_session_status", [
+  "ringing",
+  "answered",
+  "ended",
+  "cancelled",
+  "declined",
+  "missed",
+]);
 
 export const usersTable = pgTable(
   "users",
@@ -186,6 +194,7 @@ export const deviceTokensTable = pgTable("device_tokens", {
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" }),
   pushToken: text("push_token").notNull(),
+  voipPushToken: text("voip_push_token"),
   platform: text("platform").notNull(),
   deviceName: text("device_name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -264,6 +273,34 @@ export const storyViewsTable = pgTable(
   (table) => ({
     pk: primaryKey({ columns: [table.storyId, table.viewerUserId] }),
     viewerIdx: index("story_views_viewer_idx").on(table.viewerUserId),
+  }),
+);
+
+export const callSessionsTable = pgTable(
+  "call_sessions",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversationsTable.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    callerUserId: text("caller_user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    callerName: text("caller_name").notNull(),
+    callerAvatarUrl: text("caller_avatar_url"),
+    calleeUserIds: text("callee_user_ids").notNull(),
+    status: callSessionStatusEnum("status").notNull().default("ringing"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    callLogCreated: boolean("call_log_created").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    conversationIdx: index("call_sessions_conversation_idx").on(table.conversationId),
+    callerIdx: index("call_sessions_caller_idx").on(table.callerUserId),
+    statusIdx: index("call_sessions_status_idx").on(table.status),
+    createdAtIdx: index("call_sessions_created_at_idx").on(table.createdAt),
   }),
 );
 
@@ -359,3 +396,4 @@ export type MessageRecord = typeof messagesTable.$inferSelect;
 export type MessageReceiptRecord = typeof messageReceiptsTable.$inferSelect;
 export type StoryRecord = typeof storiesTable.$inferSelect;
 export type StoryViewRecord = typeof storyViewsTable.$inferSelect;
+export type CallSessionRecord = typeof callSessionsTable.$inferSelect;
