@@ -8,6 +8,7 @@ export type ActiveCallSession = {
   type: "audio" | "video";
   callerUserId: string;
   callerName: string;
+  callerAvatarUrl: string | null;
   calleeUserIds: string[];
   status: CallSessionStatus;
   createdAt: number;
@@ -45,6 +46,7 @@ export function createCallSession(input: {
   type: "audio" | "video";
   callerUserId: string;
   callerName: string;
+  callerAvatarUrl?: string | null;
   calleeUserIds: string[];
 }) {
   const existingId = byConversation.get(input.conversationId);
@@ -62,6 +64,7 @@ export function createCallSession(input: {
     type: input.type,
     callerUserId: input.callerUserId,
     callerName: input.callerName,
+    callerAvatarUrl: input.callerAvatarUrl ?? null,
     calleeUserIds: input.calleeUserIds,
     status: "ringing",
     createdAt: Date.now(),

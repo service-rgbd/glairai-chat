@@ -1,5 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
+import { finalizeCall, getCallSession } from "./call-session-store";
 import {
   contactEdgesTable,
   conversationMembersTable,
@@ -123,9 +124,15 @@ export interface RealtimeEvent {
     | "conversation.updated"
     | "member.added"
     | "member.removed"
-    | "call.invited";
+    | "call.invited"
+    | "call.answered"
+    | "call.cancelled"
+    | "call.declined"
+    | "call.ended"
+    | "call.missed";
   participantIds: string[];
   conversationId?: string;
+  callId?: string;
   messageId?: string;
   message?: ConversationMessage;
   receipt?: MessageReceipt;
@@ -134,6 +141,7 @@ export interface RealtimeEvent {
   removedUserId?: string;
   callerUserId?: string;
   callerName?: string;
+  callerAvatarUrl?: string | null;
   callType?: "audio" | "video";
 }
 
@@ -238,6 +246,24 @@ export interface ChatService {
   ): Awaitable<{
     matches: Array<{ contactName: string; phone: string; user: UserProfile }>;
   }>;
+  listSavedContacts(token: string): Awaitable<{
+    contacts: Array<{
+      phone: string;
+      contactName: string;
+      userId: string | null;
+      source: "phonebook" | "story_reply" | "manual";
+    }>;
+  }>;
+  updateSavedContact(
+    token: string,
+    phone: string,
+    input: { contactName: string },
+  ): Awaitable<{
+    phone: string;
+    contactName: string;
+    userId: string | null;
+    source: "phonebook" | "story_reply" | "manual";
+  }>;
   registerDeviceToken(
     token: string,
     input: { pushToken: string; platform: string; deviceName: string },
@@ -262,8 +288,18 @@ export interface ChatService {
       type: "audio" | "video";
       callerUserId: string;
       callerName: string;
+      callerAvatarUrl?: string | null;
+      callId: string;
     },
   ): Awaitable<void>;
+  publishCallAnswered(
+    token: string,
+    input: { callId: string; conversationId: string; calleeUserId: string },
+  ): Awaitable<void>;
+  publishCallCancelled(token: string, session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] }): Awaitable<void>;
+  publishCallDeclined(token: string, session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] }): Awaitable<void>;
+  publishCallEnded(token: string, session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] }): Awaitable<void>;
+  publishCallMissed(callId: string): Awaitable<void>;
 }
 
 interface UserRecord {
@@ -486,9 +522,11 @@ async function sendExpoIncomingCallPushes(
   recipients: Array<{ pushToken: string; notificationSoundEnabled: boolean }>,
   input: {
     callerName: string;
+    callerAvatarUrl?: string | null;
     conversationId: string;
     callType: "audio" | "video";
     callerUserId: string;
+    callId: string;
   },
 ) {
   const payload = recipients
@@ -497,7 +535,7 @@ async function sendExpoIncomingCallPushes(
       to: item.pushToken,
       title: input.callerName,
       body: input.callType === "video" ? "Appel vidéo entrant" : "Appel audio entrant",
-      sound: item.notificationSoundEnabled ? "default" : null,
+      sound: item.notificationSoundEnabled ? "incoming.wav" : null,
       priority: "high",
       channelId: "calls",
       categoryId: "incoming_call",
@@ -507,6 +545,8 @@ async function sendExpoIncomingCallPushes(
         callType: input.callType,
         callerUserId: input.callerUserId,
         callerName: input.callerName,
+        callerAvatarUrl: input.callerAvatarUrl ?? null,
+        callId: input.callId,
       },
     }));
 
@@ -2577,7 +2617,12 @@ class DatabaseChatService implements ChatService {
 
     const normalizedPhones = Array.from(normalizedContacts.keys());
     if (!normalizedPhones.length) {
-      await db!.delete(contactEdgesTable).where(eq(contactEdgesTable.ownerUserId, user.id));
+      await db!.delete(contactEdgesTable).where(
+        and(
+          eq(contactEdgesTable.ownerUserId, user.id),
+          eq(contactEdgesTable.source, "phonebook"),
+        ),
+      );
       return { matches: [] };
     }
 
@@ -2590,19 +2635,31 @@ class DatabaseChatService implements ChatService {
       matchedUsers.map((matchedUser) => [matchedUser.normalizedPhone, matchedUser] as const),
     );
 
-    await db!.delete(contactEdgesTable).where(eq(contactEdgesTable.ownerUserId, user.id));
-    await db!.insert(contactEdgesTable).values(
-      normalizedPhones.map((phone) => {
-        const contact = normalizedContacts.get(phone)!;
-        const matchedUser = matchedUsersByPhone.get(phone);
-        return {
+    await db!.delete(contactEdgesTable).where(
+      and(eq(contactEdgesTable.ownerUserId, user.id), eq(contactEdgesTable.source, "phonebook")),
+    );
+
+    for (const phone of normalizedPhones) {
+      const contact = normalizedContacts.get(phone)!;
+      const matchedUser = matchedUsersByPhone.get(phone);
+      await db!
+        .insert(contactEdgesTable)
+        .values({
           ownerUserId: user.id,
           normalizedPhone: phone,
           contactName: contact.contactName,
           matchedUserId: matchedUser?.id ?? null,
-        };
-      }),
-    );
+          source: "phonebook",
+        })
+        .onConflictDoUpdate({
+          target: [contactEdgesTable.ownerUserId, contactEdgesTable.normalizedPhone],
+          set: {
+            contactName: contact.contactName,
+            matchedUserId: matchedUser?.id ?? null,
+            source: "phonebook",
+          },
+        });
+    }
 
     const matchedUserIds = new Set<string>();
     const pendingMatches: Array<{ contactName: string; phone: string; userId: string }> = [];
@@ -2636,6 +2693,81 @@ class DatabaseChatService implements ChatService {
       .filter((match): match is NonNullable<typeof match> => Boolean(match));
 
     return { matches };
+  }
+
+  async listSavedContacts(token: string) {
+    const user = await this.requireUserByToken(token);
+    const rows = await db!
+      .select({
+        phone: contactEdgesTable.normalizedPhone,
+        contactName: contactEdgesTable.contactName,
+        userId: contactEdgesTable.matchedUserId,
+        source: contactEdgesTable.source,
+      })
+      .from(contactEdgesTable)
+      .where(eq(contactEdgesTable.ownerUserId, user.id))
+      .orderBy(contactEdgesTable.contactName);
+
+    return {
+      contacts: rows.map((row) => ({
+        phone: row.phone,
+        contactName: row.contactName,
+        userId: row.userId,
+        source: row.source as "phonebook" | "story_reply" | "manual",
+      })),
+    };
+  }
+
+  async updateSavedContact(
+    token: string,
+    phone: string,
+    input: { contactName: string },
+  ) {
+    const user = await this.requireUserByToken(token);
+    const normalizedPhone = phone.trim();
+    const contactName = input.contactName.trim();
+    if (!normalizedPhone) {
+      throw new Error("Numéro de contact invalide");
+    }
+    if (!contactName) {
+      throw new Error("Le nom du contact est requis");
+    }
+
+    const [existing] = await db!
+      .select()
+      .from(contactEdgesTable)
+      .where(
+        and(
+          eq(contactEdgesTable.ownerUserId, user.id),
+          eq(contactEdgesTable.normalizedPhone, normalizedPhone),
+        ),
+      )
+      .limit(1);
+
+    if (!existing) {
+      throw new Error("Contact introuvable");
+    }
+
+    if (existing.source === "phonebook") {
+      throw new Error("Renommez ce contact depuis votre carnet d'adresses");
+    }
+
+    await db!
+      .update(contactEdgesTable)
+      .set({ contactName })
+      .where(
+        and(
+          eq(contactEdgesTable.ownerUserId, user.id),
+          eq(contactEdgesTable.normalizedPhone, normalizedPhone),
+        ),
+      );
+
+    return {
+      phone: normalizedPhone,
+      contactName,
+      userId: existing.matchedUserId,
+      source: existing.source as "phonebook" | "story_reply" | "manual",
+    };
   }
 
   async registerDeviceToken(
@@ -2753,7 +2885,7 @@ class DatabaseChatService implements ChatService {
     }
 
     if (!(await this.canViewStory(viewer.id, story.userId))) {
-      throw new Error("Ce statut n'est visible que par les contacts enregistrés");
+      throw new Error("Ce statut n'est visible que par vos contacts mutuels sur Gbairai");
     }
 
     await db!
@@ -2791,6 +2923,8 @@ class DatabaseChatService implements ChatService {
     if (!(await this.canViewStory(viewer.id, story.userId))) {
       throw new Error("Accès au statut refusé");
     }
+
+    await this.ensureContactFromStoryReply(story.userId, viewer.id);
 
     const trimmedText = input.text?.trim() ?? "";
     const emoji = input.emoji?.trim() ?? "";
@@ -2849,6 +2983,8 @@ class DatabaseChatService implements ChatService {
       type: "audio" | "video";
       callerUserId: string;
       callerName: string;
+      callerAvatarUrl?: string | null;
+      callId: string;
     },
   ) {
     const user = await this.requireUserByToken(token);
@@ -2861,8 +2997,10 @@ class DatabaseChatService implements ChatService {
       type: "call.invited",
       participantIds,
       conversationId: input.conversationId,
+      callId: input.callId,
       callerUserId: input.callerUserId,
       callerName: input.callerName,
+      callerAvatarUrl: input.callerAvatarUrl ?? null,
       callType: input.type,
     });
 
@@ -2887,9 +3025,83 @@ class DatabaseChatService implements ChatService {
 
     await sendExpoIncomingCallPushes(devices, {
       callerName: input.callerName,
+      callerAvatarUrl: input.callerAvatarUrl,
       conversationId: input.conversationId,
       callType: input.type,
       callerUserId: input.callerUserId,
+      callId: input.callId,
+    });
+  }
+
+  async publishCallAnswered(
+    token: string,
+    input: { callId: string; conversationId: string; calleeUserId: string },
+  ) {
+    await this.requireUserByToken(token);
+    const participantIds = await this.getConversationParticipantIds(input.conversationId);
+    this.publish({
+      type: "call.answered",
+      participantIds,
+      conversationId: input.conversationId,
+      callId: input.callId,
+    });
+  }
+
+  async publishCallCancelled(
+    token: string,
+    session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
+  ) {
+    await this.requireUserByToken(token);
+    const participantIds = await this.getConversationParticipantIds(session.conversationId);
+    this.publish({
+      type: "call.cancelled",
+      participantIds,
+      conversationId: session.conversationId,
+      callId: session.id,
+      callerUserId: session.callerUserId,
+    });
+  }
+
+  async publishCallDeclined(
+    token: string,
+    session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
+  ) {
+    await this.requireUserByToken(token);
+    const participantIds = await this.getConversationParticipantIds(session.conversationId);
+    this.publish({
+      type: "call.declined",
+      participantIds,
+      conversationId: session.conversationId,
+      callId: session.id,
+      callerUserId: session.callerUserId,
+    });
+  }
+
+  async publishCallEnded(
+    token: string,
+    session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
+  ) {
+    await this.requireUserByToken(token);
+    const participantIds = await this.getConversationParticipantIds(session.conversationId);
+    this.publish({
+      type: "call.ended",
+      participantIds,
+      conversationId: session.conversationId,
+      callId: session.id,
+    });
+  }
+
+  async publishCallMissed(callId: string) {
+    const session = getCallSession(callId);
+    if (!session || session.status !== "ringing") return;
+    finalizeCall(callId, "missed");
+    const participantIds = await this.getConversationParticipantIds(session.conversationId);
+    this.publish({
+      type: "call.missed",
+      participantIds,
+      conversationId: session.conversationId,
+      callId: session.id,
+      callerUserId: session.callerUserId,
     });
   }
 
@@ -3275,23 +3487,70 @@ class DatabaseChatService implements ChatService {
     };
   }
 
-  private async canViewStory(viewerUserId: string, ownerUserId: string) {
-    if (viewerUserId === ownerUserId) {
-      return true;
-    }
-
+  private async hasRegisteredContact(ownerUserId: string, matchedUserId: string) {
     const [contactEdge] = await db!
       .select({ ownerUserId: contactEdgesTable.ownerUserId })
       .from(contactEdgesTable)
       .where(
         and(
-          eq(contactEdgesTable.ownerUserId, viewerUserId),
-          eq(contactEdgesTable.matchedUserId, ownerUserId),
+          eq(contactEdgesTable.ownerUserId, ownerUserId),
+          eq(contactEdgesTable.matchedUserId, matchedUserId),
         ),
       )
       .limit(1);
 
     return Boolean(contactEdge);
+  }
+
+  private async canViewStory(viewerUserId: string, ownerUserId: string) {
+    if (viewerUserId === ownerUserId) {
+      return true;
+    }
+
+    if (await this.hasRegisteredContact(viewerUserId, ownerUserId)) {
+      return true;
+    }
+
+    const directConversationId = await this.findExistingDirectConversation([
+      viewerUserId,
+      ownerUserId,
+    ]);
+    return Boolean(directConversationId);
+  }
+
+  private async ensureContactFromStoryReply(ownerUserId: string, viewerUserId: string) {
+    const [viewer] = await db!
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, viewerUserId))
+      .limit(1);
+
+    if (!viewer) {
+      return;
+    }
+
+    const [existing] = await db!
+      .select()
+      .from(contactEdgesTable)
+      .where(
+        and(
+          eq(contactEdgesTable.ownerUserId, ownerUserId),
+          eq(contactEdgesTable.normalizedPhone, viewer.normalizedPhone),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      return;
+    }
+
+    await db!.insert(contactEdgesTable).values({
+      ownerUserId,
+      normalizedPhone: viewer.normalizedPhone,
+      contactName: viewer.name.trim() || viewer.phone,
+      matchedUserId: viewer.id,
+      source: "story_reply",
+    });
   }
 }
 

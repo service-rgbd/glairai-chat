@@ -120,6 +120,7 @@ export async function createCallSession(
     type: input.type,
     callerUserId: currentUser.id,
     callerName: currentUser.name,
+    callerAvatarUrl: currentUser.avatarUrl,
     calleeUserIds,
   });
 
@@ -128,6 +129,7 @@ export async function createCallSession(
     type: input.type,
     callerUserId: currentUser.id,
     callerName: currentUser.name,
+    callerAvatarUrl: currentUser.avatarUrl,
     callId: activeCall.id,
   });
 
@@ -195,6 +197,7 @@ export async function getIncomingCallForUser(authToken: string) {
     conversationId: session.conversationId,
     callerUserId: session.callerUserId,
     callerName: session.callerName,
+    callerAvatarUrl: session.callerAvatarUrl,
     callType: session.type,
   };
 }
