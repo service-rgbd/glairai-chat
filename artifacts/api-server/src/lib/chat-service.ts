@@ -3077,7 +3077,7 @@ class DatabaseChatService implements ChatService {
       conversationId: session.conversationId,
       callerUserId: session.callerUserId,
       callType: liveSession?.type ?? "audio",
-      outcome: "cancelled",
+      outcome: "missed",
     });
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({

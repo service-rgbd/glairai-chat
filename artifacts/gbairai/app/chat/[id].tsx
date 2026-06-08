@@ -29,7 +29,7 @@ import {
 } from "@/lib/message-actions";
 
 export default function ChatScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, recordVoice } = useLocalSearchParams<{ id: string; recordVoice?: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { wallpaperId } = useChatWallpaper();
@@ -355,6 +355,7 @@ export default function ChatScreen() {
         </View>
         <ChatInput
           conversationId={id}
+          autoStartVoiceRecording={recordVoice === "1"}
           onSend={handleSend}
           onSendEmoji3d={handleSendEmoji3d}
           onSendAudio={(payload) => {

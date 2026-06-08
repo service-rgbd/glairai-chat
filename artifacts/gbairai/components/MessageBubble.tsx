@@ -1,12 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { Avatar } from "@/components/Avatar";
 import type { GMessage, GUser } from "@/contexts/chats-types";
+import { VoiceNoteBubble } from "@/components/VoiceNoteBubble";
 import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { useChatFontScale } from "@/hooks/useChatFontScale";
 import { useColors } from "@/hooks/useColors";
@@ -53,8 +52,6 @@ export function MessageBubble({
     message.type === "text" && !emoji3dPayload
       ? getCallMessagePayloadFromContent(message.content)
       : null;
-  const player = useAudioPlayer(audioPayload?.url ?? null);
-  const playerStatus = useAudioPlayerStatus(player);
   const resolvedImageUrl = imagePayload ? getDisplayMediaUrl(imagePayload.key, imagePayload.url) : null;
   const resolvedVideoUrl = videoPayload ? getDisplayMediaUrl(videoPayload.key, videoPayload.url) : null;
   const resolvedVideoThumbnailUrl =
@@ -136,22 +133,6 @@ export function MessageBubble({
     });
   };
 
-  const formatDuration = (seconds: number) => {
-    const safeSeconds = Math.max(0, Math.round(seconds));
-    const minutes = Math.floor(safeSeconds / 60);
-    const remaining = safeSeconds % 60;
-    return `${minutes}:${remaining.toString().padStart(2, "0")}`;
-  };
-
-  const playbackProgress =
-    audioPayload && audioPayload.durationSeconds > 0
-      ? Math.min((playerStatus.currentTime || 0) / audioPayload.durationSeconds, 1)
-      : 0;
-  const waveformBars = [0.28, 0.62, 0.44, 0.86, 0.52, 0.74, 0.38, 0.68, 0.56, 0.42, 0.78, 0.48, 0.66, 0.34, 0.58, 0.72, 0.46, 0.64];
-  const audioDisplaySeconds = player.playing
-    ? playerStatus.currentTime || 0
-    : audioPayload?.durationSeconds ?? 0;
-
   const renderMediaOverlay = () => (
     <View style={styles.mediaOverlay}>
       <Text style={styles.mediaOverlayTime}>{time}</Text>
@@ -184,108 +165,14 @@ export function MessageBubble({
           <Text style={[styles.senderName, { color: sender.color }]}>{sender.name}</Text>
         )}
         {audioPayload ? (
-          <View style={styles.voiceNote}>
-            <TouchableOpacity
-              style={styles.voicePlayBtn}
-              onPress={() => {
-                if (player.playing) {
-                  player.pause();
-                } else {
-                  if (
-                    playerStatus.duration &&
-                    playerStatus.currentTime >= playerStatus.duration &&
-                    playerStatus.duration > 0
-                  ) {
-                    void player.seekTo(0);
-                  }
-                  player.play();
-                }
-              }}
-              activeOpacity={0.75}
-            >
-              <Ionicons
-                name={player.playing ? "pause" : "play"}
-                size={22}
-                color={isMe ? colors.chatBubbleSentText : colors.mutedForeground}
-              />
-            </TouchableOpacity>
-
-            <View style={styles.voiceWaveWrap}>
-              <View style={styles.waveformRow}>
-                {waveformBars.map((value, index) => {
-                  const barProgress = index / Math.max(waveformBars.length - 1, 1);
-                  const isPlayed = barProgress <= playbackProgress;
-                  return (
-                    <View
-                      key={`${message.id}-bar-${index}`}
-                      style={[
-                        styles.waveformBar,
-                        {
-                          height: 6 + value * 16,
-                          backgroundColor: isPlayed
-                            ? isMe
-                              ? colors.chatBubbleSentText
-                              : colors.primary
-                            : isMe
-                              ? "rgba(255,255,255,0.35)"
-                              : colors.border,
-                        },
-                      ]}
-                    />
-                  );
-                })}
-                <View
-                  style={[
-                    styles.waveformScrubber,
-                    {
-                      left: `${Math.max(0, Math.min(playbackProgress, 1)) * 100}%`,
-                      backgroundColor: isMe ? colors.chatBubbleSentText : colors.primary,
-                    },
-                  ]}
-                />
-              </View>
-              <View style={styles.voiceMetaRow}>
-                <Text
-                  style={[
-                    styles.voiceDuration,
-                    { color: isMe ? "rgba(255,255,255,0.78)" : colors.mutedForeground },
-                  ]}
-                >
-                  {formatDuration(audioDisplaySeconds)}
-                </Text>
-                <View style={styles.voiceTimeRow}>
-                  <Text
-                    style={[
-                      styles.voiceTime,
-                      { color: isMe ? "rgba(255,255,255,0.72)" : colors.mutedForeground },
-                    ]}
-                  >
-                    {time}
-                  </Text>
-                  <StatusIcon />
-                </View>
-              </View>
-            </View>
-
-            {profileUser ? (
-              <View style={styles.voiceAvatarWrap}>
-                <Avatar
-                  uri={profileUser.avatar}
-                  initials={profileUser.initials}
-                  color={profileUser.color}
-                  size={36}
-                />
-                <View
-                  style={[
-                    styles.voiceMicBadge,
-                    { backgroundColor: isMe ? colors.chatBubbleSent : colors.background },
-                  ]}
-                >
-                  <Ionicons name="mic" size={10} color={colors.primary} />
-                </View>
-              </View>
-            ) : null}
-          </View>
+          <VoiceNoteBubble
+            messageId={message.id}
+            audioPayload={audioPayload}
+            isMe={isMe}
+            time={time}
+            profileUser={profileUser}
+            renderStatusIcon={() => <StatusIcon />}
+          />
         ) : imagePayload ? (
           <TouchableOpacity
             style={styles.mediaWrap}
@@ -476,78 +363,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontFamily: "Inter_400Regular",
     lineHeight: 24,
-  },
-  voiceNote: {
-    minWidth: 240,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  voicePlayBtn: {
-    width: 28,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  voiceWaveWrap: {
-    flex: 1,
-    minWidth: 0,
-    paddingTop: 2,
-  },
-  waveformRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 2,
-    height: 28,
-    position: "relative",
-  },
-  waveformBar: {
-    width: 3,
-    borderRadius: 999,
-  },
-  waveformScrubber: {
-    position: "absolute",
-    top: 4,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: -4,
-  },
-  voiceMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  voiceDuration: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  voiceTimeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  voiceTime: {
-    fontSize: 11,
-    fontFamily: "Inter_400Regular",
-  },
-  voiceAvatarWrap: {
-    position: "relative",
-    marginTop: 2,
-  },
-  voiceMicBadge: {
-    position: "absolute",
-    left: -2,
-    bottom: -2,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "#fff",
   },
   mediaWrap: {
     position: "relative",

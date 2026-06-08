@@ -1,0 +1,238 @@
+import { Ionicons } from "@expo/vector-icons";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import React, { useMemo, useState } from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+
+import { Avatar } from "@/components/Avatar";
+import type { GUser } from "@/contexts/chats-types";
+import { useColors } from "@/hooks/useColors";
+import type { AudioMessagePayload } from "@/lib/media";
+
+const WAVEFORM_BARS = [
+  0.28, 0.62, 0.44, 0.86, 0.52, 0.74, 0.38, 0.68, 0.56, 0.42, 0.78, 0.48, 0.66, 0.34, 0.58,
+  0.72, 0.46, 0.64,
+];
+
+function formatDuration(seconds: number) {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remaining = safeSeconds % 60;
+  return `${minutes}:${remaining.toString().padStart(2, "0")}`;
+}
+
+interface VoiceNoteBubbleProps {
+  messageId: string;
+  audioPayload: AudioMessagePayload;
+  isMe: boolean;
+  time: string;
+  profileUser?: Pick<GUser, "avatar" | "initials" | "color">;
+  renderStatusIcon: () => React.ReactNode;
+}
+
+export function VoiceNoteBubble({
+  messageId,
+  audioPayload,
+  isMe,
+  time,
+  profileUser,
+  renderStatusIcon,
+}: VoiceNoteBubbleProps) {
+  const colors = useColors();
+  const player = useAudioPlayer(audioPayload.url, { updateInterval: 80 });
+  const playerStatus = useAudioPlayerStatus(player);
+  const [waveformWidth, setWaveformWidth] = useState(0);
+
+  const totalDuration = useMemo(() => {
+    if (playerStatus.duration && playerStatus.duration > 0) {
+      return playerStatus.duration;
+    }
+    return audioPayload.durationSeconds > 0 ? audioPayload.durationSeconds : 0;
+  }, [audioPayload.durationSeconds, playerStatus.duration]);
+
+  const currentTime = Math.max(0, playerStatus.currentTime || 0);
+  const playbackProgress =
+    totalDuration > 0 ? Math.min(currentTime / totalDuration, 1) : 0;
+  const scrubberLeft = playbackProgress * Math.max(waveformWidth - 8, 0);
+  const audioDisplaySeconds = player.playing ? currentTime : totalDuration || audioPayload.durationSeconds;
+
+  const togglePlayback = () => {
+    if (player.playing) {
+      player.pause();
+      return;
+    }
+    if (
+      playerStatus.duration &&
+      playerStatus.currentTime >= playerStatus.duration &&
+      playerStatus.duration > 0
+    ) {
+      void player.seekTo(0);
+    }
+    player.play();
+  };
+
+  return (
+    <View style={styles.voiceNote}>
+      <TouchableOpacity style={styles.voicePlayBtn} onPress={togglePlayback} activeOpacity={0.75}>
+        <Ionicons
+          name={player.playing ? "pause" : "play"}
+          size={22}
+          color={isMe ? colors.chatBubbleSentText : colors.mutedForeground}
+        />
+      </TouchableOpacity>
+
+      <View style={styles.voiceWaveWrap}>
+        <View
+          style={styles.waveformRow}
+          onLayout={(event) => setWaveformWidth(event.nativeEvent.layout.width)}
+        >
+          {WAVEFORM_BARS.map((value, index) => {
+            const barEnd = (index + 1) / WAVEFORM_BARS.length;
+            const isPlayed = barEnd <= playbackProgress;
+            return (
+              <View
+                key={`${messageId}-bar-${index}`}
+                style={[
+                  styles.waveformBar,
+                  {
+                    height: 6 + value * 16,
+                    backgroundColor: isPlayed
+                      ? isMe
+                        ? colors.chatBubbleSentText
+                        : colors.primary
+                      : isMe
+                        ? "rgba(255,255,255,0.35)"
+                        : colors.border,
+                  },
+                ]}
+              />
+            );
+          })}
+          <View
+            style={[
+              styles.waveformScrubber,
+              { left: scrubberLeft },
+              {
+                backgroundColor: isMe ? colors.chatBubbleSentText : colors.primary,
+              },
+            ]}
+          />
+        </View>
+        <View style={styles.voiceMetaRow}>
+          <Text
+            style={[
+              styles.voiceDuration,
+              { color: isMe ? "rgba(255,255,255,0.78)" : colors.mutedForeground },
+            ]}
+          >
+            {formatDuration(audioDisplaySeconds)}
+          </Text>
+          <View style={styles.voiceTimeRow}>
+            <Text
+              style={[
+                styles.voiceTime,
+                { color: isMe ? "rgba(255,255,255,0.72)" : colors.mutedForeground },
+              ]}
+            >
+              {time}
+            </Text>
+            {renderStatusIcon()}
+          </View>
+        </View>
+      </View>
+
+      {profileUser ? (
+        <View style={styles.voiceAvatarWrap}>
+          <Avatar
+            uri={profileUser.avatar}
+            initials={profileUser.initials}
+            color={profileUser.color}
+            size={36}
+          />
+          <View
+            style={[
+              styles.voiceMicBadge,
+              { backgroundColor: isMe ? colors.chatBubbleSent : colors.background },
+            ]}
+          >
+            <Ionicons name="mic" size={10} color={colors.primary} />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  voiceNote: {
+    minWidth: 240,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  voicePlayBtn: {
+    width: 28,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  voiceWaveWrap: {
+    flex: 1,
+    minWidth: 0,
+    paddingTop: 2,
+  },
+  waveformRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 2,
+    height: 28,
+    position: "relative",
+  },
+  waveformBar: {
+    width: 3,
+    borderRadius: 999,
+  },
+  waveformScrubber: {
+    position: "absolute",
+    top: 4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: -4,
+  },
+  voiceMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  voiceDuration: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  voiceTimeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  voiceTime: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+  },
+  voiceAvatarWrap: {
+    position: "relative",
+    marginTop: 2,
+  },
+  voiceMicBadge: {
+    position: "absolute",
+    left: -2,
+    bottom: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#fff",
+  },
+});

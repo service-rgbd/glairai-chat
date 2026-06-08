@@ -169,7 +169,7 @@ export async function signalCall(
 
     const outcome =
       input.action === "cancel"
-        ? ("cancelled" as const)
+        ? ("missed" as const)
         : input.action === "decline"
           ? ("declined" as const)
           : ("completed" as const);

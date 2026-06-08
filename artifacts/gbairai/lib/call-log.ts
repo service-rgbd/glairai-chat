@@ -19,7 +19,6 @@ export function resolveCallLogOutcome(input: {
 }): CallMessageOutcome {
   if (input.wasConnected) return "completed";
   if (input.declined) return "declined";
-  if (!input.isIncoming) return "cancelled";
   return "missed";
 }
 

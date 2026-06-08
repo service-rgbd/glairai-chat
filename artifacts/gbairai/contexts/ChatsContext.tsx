@@ -1025,13 +1025,11 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       });
 
       const outcome =
-        type === "missed"
+        type === "missed" || type === "cancelled"
           ? ("missed" as const)
-          : type === "cancelled"
-            ? ("cancelled" as const)
-            : type === "declined"
-              ? ("declined" as const)
-              : ("completed" as const);
+          : type === "declined"
+            ? ("declined" as const)
+            : ("completed" as const);
 
       const refreshConversation = () => {
         void queryClient.invalidateQueries({ queryKey: ["messages", event.conversationId] });

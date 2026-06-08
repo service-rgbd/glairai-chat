@@ -77,7 +77,7 @@ export function getCallMessageLabel(payload: CallMessagePayload, isCaller: boole
     return "Appel refusé";
   }
 
-  return isCaller ? "Appel annulé" : "Appel manqué";
+  return isCaller ? "Appel sans réponse" : "Appel manqué";
 }
 
 export function isCallMessageNegative(payload: CallMessagePayload, isCaller: boolean) {

@@ -16,7 +16,7 @@ export type ActiveCallSession = {
   callLogCreated: boolean;
 };
 
-const RING_TIMEOUT_MS = 45_000;
+const RING_TIMEOUT_MS = 15_000;
 const sessions = new Map<string, ActiveCallSession>();
 const byConversation = new Map<string, string>();
 const timeoutHandles = new Map<string, ReturnType<typeof setTimeout>>();

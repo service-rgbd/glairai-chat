@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   StyleSheet,
   Text,
@@ -18,6 +19,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import { configureCallAudioMode, resetCallAudioMode, type CallSoundPhase } from "@/lib/call-audio";
+import { CALL_RING_TIMEOUT_MS } from "@/lib/call-config";
 import { isNativeCallSupported, isExpoGoRuntime } from "@/lib/call-runtime";
 import { subscribeCallSignal } from "@/lib/call-signaling";
 import { logConversationCall, resolveCallLogOutcome } from "@/lib/call-log";
@@ -81,7 +83,12 @@ export default function CallScreen() {
   const nativeCallsEnabled = isNativeCallSupported();
 
   const finishCall = useCallback(
-    (options?: { failed?: boolean; missed?: boolean; declined?: boolean }) => {
+    (options?: {
+      failed?: boolean;
+      missed?: boolean;
+      declined?: boolean;
+      suggestVoiceMessage?: boolean;
+    }) => {
       if (hangupRef.current) return;
       hangupRef.current = true;
 
@@ -101,9 +108,30 @@ export default function CallScreen() {
       clearIncomingCallIfMatches(activeCallSessionIdRef.current);
       setSoundPhase("ended");
       void resetCallAudioMode();
+
+      if (options?.suggestVoiceMessage && conversationId) {
+        Alert.alert(
+          "Pas de réponse",
+          `${otherUser?.name ?? "Votre contact"} ne répond pas. Souhaitez-vous laisser un message vocal ?`,
+          [
+            { text: "Fermer", style: "cancel", onPress: () => router.back() },
+            {
+              text: "Message vocal",
+              onPress: () => {
+                router.replace({
+                  pathname: "/chat/[id]",
+                  params: { id: conversationId, recordVoice: "1" },
+                });
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       setTimeout(() => router.back(), 350);
     },
-    [updateCall],
+    [conversationId, otherUser?.name, updateCall],
   );
 
   const hangup = useCallback(async () => {
@@ -164,6 +192,7 @@ export default function CallScreen() {
     finishCall({
       missed: isIncoming && !wasConnected,
       failed: false,
+      suggestVoiceMessage: !isIncoming && !wasConnected,
     });
   }, [authToken, callType, conversationId, currentUser?.id, finishCall, isIncoming, otherUser?.id]);
 
@@ -261,7 +290,11 @@ export default function CallScreen() {
       }
 
       if (event.type === "declined" || event.type === "cancelled" || event.type === "missed") {
-        finishCall({ missed: isIncoming && !wasConnectedRef.current && !callAnsweredRef.current });
+        const wasConnected = wasConnectedRef.current;
+        finishCall({
+          missed: isIncoming && !wasConnected,
+          suggestVoiceMessage: !isIncoming && !wasConnected,
+        });
         return;
       }
 
@@ -270,6 +303,18 @@ export default function CallScreen() {
       }
     });
   }, [conversationId, finishCall, isIncoming]);
+
+  useEffect(() => {
+    if (isIncoming || soundPhase !== "ringing" || wasConnectedRef.current || hangupRef.current) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void hangup();
+    }, CALL_RING_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [hangup, isIncoming, soundPhase]);
 
   const handleRemoteJoined = useCallback(() => {
     if (connectedAtRef.current != null) return;
