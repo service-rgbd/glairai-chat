@@ -40,14 +40,16 @@ export default function OtpScreen() {
   }, []);
 
   useEffect(() => {
-    if (!isOtpDemoDevMode() || !pendingOtpCode || pendingOtpCode.length !== CODE_LENGTH) {
+    const demoCode =
+      pendingOtpCode != null ? String(pendingOtpCode).replace(/\D/g, "").slice(0, CODE_LENGTH) : "";
+    if (!isOtpDemoDevMode() || demoCode.length !== CODE_LENGTH) {
       return;
     }
     if (autoFilledRef.current) {
       return;
     }
     autoFilledRef.current = true;
-    setDigits(pendingOtpCode.split("").slice(0, CODE_LENGTH));
+    setDigits(demoCode.split(""));
   }, [pendingOtpCode]);
 
   const handleDigit = (index: number, val: string) => {

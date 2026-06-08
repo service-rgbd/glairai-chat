@@ -14,14 +14,13 @@ import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { isExpoGo } from "@/lib/runtime-env";
-
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AuthenticatedNativeCallController } from "@/components/AuthenticatedNativeCallController";
 import { IncomingCallOverlay } from "@/components/IncomingCallOverlay";
-import { NativeCallController } from "@/components/NativeCallController";
 import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatsProvider } from "@/contexts/ChatsContext";
+import { AppKeyboardProvider } from "@/lib/keyboard-shell";
 import { queryClient } from "@/lib/query-client";
 import { getApiBaseUrl } from "@/lib/api-config";
 import { setupPushNotificationRouting } from "@/lib/notifications";
@@ -29,21 +28,7 @@ import { setupPushNotificationRouting } from "@/lib/notifications";
 SplashScreen.preventAutoHideAsync();
 
 function AppShell({ children }: { children: React.ReactNode }) {
-  const [KeyboardProvider, setKeyboardProvider] =
-    React.useState<React.ComponentType<{ children: React.ReactNode }> | null>(null);
-
-  useEffect(() => {
-    if (isExpoGo()) return;
-    void import("react-native-keyboard-controller").then((module) => {
-      setKeyboardProvider(() => module.KeyboardProvider);
-    });
-  }, []);
-
-  if (!KeyboardProvider) {
-    return <>{children}</>;
-  }
-
-  return <KeyboardProvider>{children}</KeyboardProvider>;
+  return <AppKeyboardProvider>{children}</AppKeyboardProvider>;
 }
 
 function RootStack() {
@@ -99,7 +84,7 @@ export default function RootLayout() {
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <AppShell>
                     <IncomingCallOverlay />
-                    <NativeCallController />
+                    <AuthenticatedNativeCallController />
                     <RootStack />
                   </AppShell>
                 </GestureHandlerRootView>
