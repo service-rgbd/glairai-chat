@@ -12,35 +12,103 @@ type VoipPushInput = {
 
 let provider: apn.Provider | null = null;
 
-function getBundleId() {
-  return process.env.APNS_BUNDLE_ID ?? "com.gbairai.chat";
+function stripEnvQuotes(value: string) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
 
-function getProvider() {
-  if (provider) return provider;
+/** Normalise le contenu .p8 collé dans Render (guillemets, \\n, lignes manquantes). */
+export function normalizeApnsVoipKey(raw: string | undefined) {
+  if (!raw) return null;
 
-  const key = process.env.APNS_VOIP_KEY?.replace(/\\n/g, "\n");
-  const keyId = process.env.APNS_VOIP_KEY_ID;
-  const teamId = process.env.APNS_VOIP_TEAM_ID;
+  let key = stripEnvQuotes(raw).replace(/\\n/g, "\n").trim();
+  if (!key) return null;
+
+  if (!key.includes("BEGIN PRIVATE KEY")) {
+    const body = key.replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9+/=]+$/.test(body)) {
+      return null;
+    }
+    const lines = body.match(/.{1,64}/g) ?? [body];
+    key = `-----BEGIN PRIVATE KEY-----\n${lines.join("\n")}\n-----END PRIVATE KEY-----`;
+  }
+
+  return key;
+}
+
+function getBundleId() {
+  return stripEnvQuotes(process.env.APNS_BUNDLE_ID ?? "com.gbairai.chat");
+}
+
+function readApnsVoipCredentials() {
+  const key = normalizeApnsVoipKey(process.env.APNS_VOIP_KEY);
+  const keyId = stripEnvQuotes(process.env.APNS_VOIP_KEY_ID ?? "");
+  const teamId = stripEnvQuotes(process.env.APNS_VOIP_TEAM_ID ?? "");
 
   if (!key || !keyId || !teamId) {
     return null;
   }
 
+  return {
+    key,
+    keyId,
+    teamId,
+    production: stripEnvQuotes(process.env.APNS_VOIP_PRODUCTION ?? "false") === "true",
+  };
+}
+
+function getProvider() {
+  if (provider) return provider;
+
+  const credentials = readApnsVoipCredentials();
+  if (!credentials) {
+    return null;
+  }
+
   provider = new apn.Provider({
     token: {
-      key,
-      keyId,
-      teamId,
+      key: credentials.key,
+      keyId: credentials.keyId,
+      teamId: credentials.teamId,
     },
-    production: process.env.APNS_VOIP_PRODUCTION === "true",
+    production: credentials.production,
   });
 
   return provider;
 }
 
 export function isVoipPushConfigured() {
-  return getProvider() != null;
+  return readApnsVoipCredentials() != null;
+}
+
+/** Vérifie que la clé .p8 peut signer un JWT APNS (sans envoyer de push). */
+export async function verifyApnsVoipCredentials() {
+  const credentials = readApnsVoipCredentials();
+  if (!credentials) {
+    return { ok: false as const, reason: "missing_env" as const };
+  }
+
+  try {
+    const probe = new apn.Provider({
+      token: {
+        key: credentials.key,
+        keyId: credentials.keyId,
+        teamId: credentials.teamId,
+      },
+      production: credentials.production,
+    });
+    probe.shutdown();
+    return { ok: true as const };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false as const, reason: "invalid_key" as const, message };
+  }
 }
 
 export async function sendVoipIncomingCallPushes(
