@@ -94,8 +94,9 @@ export async function verifyApnsVoipCredentials() {
     return { ok: false as const, reason: "missing_env" as const };
   }
 
+  let probe: apn.Provider | null = null;
   try {
-    const probe = new apn.Provider({
+    probe = new apn.Provider({
       token: {
         key: credentials.key,
         keyId: credentials.keyId,
@@ -103,11 +104,16 @@ export async function verifyApnsVoipCredentials() {
       },
       production: credentials.production,
     });
-    probe.shutdown();
     return { ok: true as const };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false as const, reason: "invalid_key" as const, message };
+  } finally {
+    try {
+      probe?.shutdown();
+    } catch {
+      // ignore
+    }
   }
 }
 
