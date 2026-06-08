@@ -1,6 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
-import { finalizeCall, getCallSession } from "./call-session-store";
+import { finalizeCall, getCallSession, markCallLogCreated } from "./call-session-store";
+import { encodeCallMessagePayload, type CallMessageOutcome } from "./call-messages";
 import {
   contactEdgesTable,
   conversationMembersTable,
@@ -3052,6 +3053,7 @@ class DatabaseChatService implements ChatService {
     session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
   ) {
     await this.requireUserByToken(token);
+    await this.createCallLogMessage(session.id, "cancelled");
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.cancelled",
@@ -3067,6 +3069,7 @@ class DatabaseChatService implements ChatService {
     session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
   ) {
     await this.requireUserByToken(token);
+    await this.createCallLogMessage(session.id, "declined");
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.declined",
@@ -3082,6 +3085,15 @@ class DatabaseChatService implements ChatService {
     session: { id: string; conversationId: string; callerUserId: string; calleeUserIds: string[] },
   ) {
     await this.requireUserByToken(token);
+    const liveSession = getCallSession(session.id);
+    const wasAnswered = liveSession?.answeredAt != null;
+    await this.createCallLogMessage(
+      session.id,
+      wasAnswered ? "completed" : "cancelled",
+      wasAnswered && liveSession?.answeredAt
+        ? Math.max(0, Math.round((Date.now() - liveSession.answeredAt) / 1000))
+        : null,
+    );
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.ended",
@@ -3095,6 +3107,7 @@ class DatabaseChatService implements ChatService {
     const session = getCallSession(callId);
     if (!session || session.status !== "ringing") return;
     finalizeCall(callId, "missed");
+    await this.createCallLogMessage(callId, "missed");
     const participantIds = await this.getConversationParticipantIds(session.conversationId);
     this.publish({
       type: "call.missed",
@@ -3103,6 +3116,35 @@ class DatabaseChatService implements ChatService {
       callId: session.id,
       callerUserId: session.callerUserId,
     });
+  }
+
+  private async createCallLogMessage(
+    callId: string,
+    outcome: CallMessageOutcome,
+    durationSeconds: number | null = null,
+  ) {
+    const session = getCallSession(callId);
+    if (!session || session.callLogCreated) {
+      return;
+    }
+    if (!markCallLogCreated(callId)) {
+      return;
+    }
+
+    const content = encodeCallMessagePayload({
+      kind: "call",
+      callId: session.id,
+      callType: session.type,
+      outcome,
+      durationSeconds,
+    });
+
+    await this.sendConversationMessage(
+      "",
+      session.conversationId,
+      { content, type: "text" },
+      session.callerUserId,
+    );
   }
 
   async resolveUserIdByToken(token: string) {

@@ -1022,6 +1022,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         callId: event.callId,
         conversationId: event.conversationId,
       });
+      void queryClient.invalidateQueries({ queryKey: ["messages", event.conversationId] });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     };
 
     socket.on("call.cancelled", (event?: RealtimeSocketEvent) => {

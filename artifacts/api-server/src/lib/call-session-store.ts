@@ -13,6 +13,7 @@ export type ActiveCallSession = {
   status: CallSessionStatus;
   createdAt: number;
   answeredAt: number | null;
+  callLogCreated: boolean;
 };
 
 const RING_TIMEOUT_MS = 45_000;
@@ -39,6 +40,14 @@ export function findActiveCallByConversation(conversationId: string) {
 
 export function getCallSession(callId: string) {
   return sessions.get(callId) ?? null;
+}
+
+export function markCallLogCreated(callId: string) {
+  const session = sessions.get(callId);
+  if (!session) return false;
+  if (session.callLogCreated) return false;
+  session.callLogCreated = true;
+  return true;
 }
 
 export function createCallSession(input: {
@@ -69,6 +78,7 @@ export function createCallSession(input: {
     status: "ringing",
     createdAt: Date.now(),
     answeredAt: null,
+    callLogCreated: false,
   };
 
   sessions.set(session.id, session);

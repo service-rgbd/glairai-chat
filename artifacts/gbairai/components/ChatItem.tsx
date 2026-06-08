@@ -5,6 +5,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { GChat, GMessage, GStory, GUser } from "@/contexts/chats-types";
 import { formatTimestamp } from "@/lib/format-timestamp";
 import { getEmoji3dPayloadFromContent } from "@/lib/emoji-messages";
+import { getCallMessagePreview } from "@/lib/call-messages";
 import { getGroupDisplayColor, getGroupDisplayInitials } from "@/lib/group-utils";
 import { useColors } from "@/hooks/useColors";
 
@@ -53,9 +54,13 @@ export function ChatItem({
     if (typingLabel) return typingLabel;
     if (!lastMessage) return "Démarrer une conversation";
     const prefix = lastMessage.senderId === currentUserId ? "Vous: " : (isGroup ? `${users[lastMessage.senderId]?.name?.split(" ")[0] ?? ""}: ` : "");
+    const callPreview =
+      lastMessage.type === "text"
+        ? getCallMessagePreview(lastMessage.content, currentUserId, lastMessage.senderId)
+        : null;
     const textPreview =
       lastMessage.type === "text"
-        ? (getEmoji3dPayloadFromContent(lastMessage.content)?.emoji ?? lastMessage.content)
+        ? (callPreview ?? getEmoji3dPayloadFromContent(lastMessage.content)?.emoji ?? lastMessage.content)
         : lastMessage.content;
     const preview =
       lastMessage.type === "audio"
