@@ -191,6 +191,28 @@ function CallRoomBody({
   }, [speakerOn]);
 
   useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        await AudioSession.startAudioSession();
+        if (!active) return;
+        await localParticipant.setMicrophoneEnabled(true);
+        if (callType === "video") {
+          await localParticipant.setCameraEnabled(cameraEnabled);
+        }
+        await applySpeakerRoute(speakerOn);
+        onConnected();
+      } catch {
+        // Best effort — LiveKitRoom gère aussi audio/video.
+      }
+    })();
+    return () => {
+      active = false;
+      void AudioSession.stopAudioSession();
+    };
+  }, [callType]);
+
+  useEffect(() => {
     if (remoteParticipants.length > 0) {
       hadRemoteRef.current = true;
       onRemoteJoined();

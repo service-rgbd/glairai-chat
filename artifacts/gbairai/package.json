@@ -99,6 +99,7 @@
     "libphonenumber-js": "^1.13.3",
     "livekit-client": "^2.19.0",
     "react-native-callkeep": "^4.3.16",
+    "react-native-get-random-values": "^2.0.0",
     "react-native-voip-push-notification": "^3.3.2",
     "socket.io-client": "^4.8.3"
   }

@@ -47,10 +47,6 @@ export function attachRealtime(httpServer: HttpServer) {
     const userId = socket.data["userId"] as string;
     socket.join(`user:${userId}`);
 
-    void Promise.resolve(chatService.updatePresenceHeartbeat(token, true)).catch((error: unknown) => {
-      logger.warn({ err: error }, "Failed to set user online on socket connect");
-    });
-
     socket.on("presence:heartbeat", (payload?: { isOnline?: boolean }) => {
       void Promise.resolve(
         chatService.updatePresenceHeartbeat(token, payload?.isOnline ?? true),

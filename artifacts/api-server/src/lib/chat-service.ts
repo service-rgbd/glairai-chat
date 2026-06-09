@@ -520,10 +520,27 @@ function normalizePhone(phone: string, countryCode?: string) {
   };
 }
 
+function formatPushMessageBody(content: string, type: MessageType): string {
+  if (content.startsWith("e2e:v1:")) {
+    return "Nouveau message";
+  }
+  if (type === "image") {
+    return "Photo";
+  }
+  if (type === "audio") {
+    return "Message vocal";
+  }
+  if (type === "video") {
+    return "Vidéo";
+  }
+  return content.slice(0, 160);
+}
+
 async function sendExpoPushMessages(
   devices: DeviceRecord[],
   senderName: string,
   message: string,
+  options?: { conversationId?: string; messageType?: MessageType },
 ) {
   const validTokens = devices
     .map((device) => device.pushToken)
@@ -531,15 +548,29 @@ async function sendExpoPushMessages(
 
   if (!validTokens.length) return;
 
+  const body = options?.messageType
+    ? formatPushMessageBody(message, options.messageType)
+    : message.slice(0, 160);
+
   const payload = validTokens.map((to) => ({
     to,
     title: senderName,
-    body: message,
+    body,
     sound: "default",
+    priority: "high" as const,
+    channelId: "messages",
+    ...(options?.conversationId
+      ? {
+          data: {
+            type: "new_message",
+            conversationId: options.conversationId,
+          },
+        }
+      : {}),
   }));
 
   try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -547,8 +578,14 @@ async function sendExpoPushMessages(
       },
       body: JSON.stringify(payload),
     });
-  } catch {
-    // Notifications are best-effort in development.
+    if (!response.ok) {
+      logger.warn(
+        { status: response.status, recipientCount: validTokens.length },
+        "Expo push send failed",
+      );
+    }
+  } catch (error) {
+    logger.warn({ err: error }, "Expo push send error");
   }
 }
 
@@ -1000,14 +1037,12 @@ class InMemoryChatService {
     }
 
     const fullMessage = this.toMessage(conversationId, message.id);
-    const offlineRecipients = conversation.participantIds
+    const pushRecipients = conversation.participantIds
       .map((participantId) => this.users.get(participantId))
       .filter((participant): participant is UserRecord => Boolean(participant))
       .filter(
         (participant) =>
-          participant.id !== sender.id &&
-          !participant.isOnline &&
-          participant.settings.notificationsEnabled,
+          participant.id !== sender.id && participant.settings.notificationsEnabled,
       )
       .flatMap((participant) =>
         Array.from(this.devices.values()).filter(
@@ -1015,7 +1050,10 @@ class InMemoryChatService {
         ),
       );
 
-    void sendExpoPushMessages(offlineRecipients, sender.name || "Gbairai", input.content);
+    void sendExpoPushMessages(pushRecipients, sender.name || "Gbairai", input.content, {
+      conversationId,
+      messageType: input.type,
+    });
 
     this.publish({
       type: "message.created",
@@ -2334,7 +2372,7 @@ class DatabaseChatService implements ChatService {
         );
       }
 
-      const offlineRecipients = await db!
+      const pushRecipients = await db!
         .select({
           id: deviceTokensTable.id,
           userId: deviceTokensTable.userId,
@@ -2347,15 +2385,15 @@ class DatabaseChatService implements ChatService {
         .where(
           and(
             inArray(deviceTokensTable.userId, participantIds.filter((id) => id !== sender.id)),
-            eq(usersTable.isOnline, false),
             eq(usersTable.notificationsEnabled, true),
           ),
         );
 
       await sendExpoPushMessages(
-        offlineRecipients,
+        pushRecipients,
         sender.name || "Gbairai",
         normalizedContent,
+        { conversationId, messageType: input.type },
       );
     })().catch((error: unknown) => {
       logger.warn({ err: error, conversationId, messageId }, "Post-send message work failed");

@@ -1,3 +1,6 @@
+// @noble/* et WebCrypto s'appuient sur getRandomValues — absent par défaut dans React Native.
+require("react-native-get-random-values");
+
 try {
   if (process.env.EXPO_PUBLIC_LIVEKIT_ENABLED === "true") {
     const { registerGlobals } = require("@livekit/react-native");

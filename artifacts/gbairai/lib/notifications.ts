@@ -1,7 +1,8 @@
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
+import { router } from "expo-router";
 
 import { setIncomingCall } from "@/lib/incoming-call";
 import { shouldAcceptIncomingCall } from "@/lib/call-session-client";
@@ -33,6 +34,12 @@ function isIncomingCallPushData(data: unknown): data is IncomingCallPushData {
   );
 }
 
+function isNewMessagePushData(data: unknown): data is { type: "new_message"; conversationId: string } {
+  if (!data || typeof data !== "object") return false;
+  const record = data as Record<string, unknown>;
+  return record.type === "new_message" && typeof record.conversationId === "string";
+}
+
 function showIncomingCallOverlay(data: IncomingCallPushData) {
   if (!shouldAcceptIncomingCall(data.callId)) return;
   setIncomingCall({
@@ -45,6 +52,20 @@ function showIncomingCallOverlay(data: IncomingCallPushData) {
   });
 }
 
+function openMessageConversation(conversationId: string) {
+  router.push(`/chat/${conversationId}`);
+}
+
+function handleNotificationResponse(data: unknown) {
+  if (isIncomingCallPushData(data)) {
+    showIncomingCallOverlay(data);
+    return;
+  }
+  if (isNewMessagePushData(data)) {
+    openMessageConversation(data.conversationId);
+  }
+}
+
 function ensureNotificationHandler() {
   if (notificationHandlerConfigured || isExpoGo()) {
     return;
@@ -54,7 +75,18 @@ function ensureNotificationHandler() {
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
       const data = notification.request.content.data;
-      const isCall = isIncomingCallPushData(data);
+      const isMessage = isNewMessagePushData(data);
+      const isForeground = AppState.currentState === "active";
+
+      if (isMessage && isForeground) {
+        return {
+          shouldShowAlert: false,
+          shouldPlaySound: false,
+          shouldSetBadge: true,
+          shouldShowBanner: false,
+          shouldShowList: false,
+        };
+      }
 
       return {
         shouldShowAlert: true,
@@ -82,15 +114,12 @@ export function setupPushNotificationRouting() {
   });
 
   const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
-    const data = response.notification.request.content.data;
-    if (!isIncomingCallPushData(data)) return;
-    showIncomingCallOverlay(data);
+    handleNotificationResponse(response.notification.request.content.data);
   });
 
   void Notifications.getLastNotificationResponseAsync().then((response) => {
-    const data = response?.notification.request.content.data;
-    if (!isIncomingCallPushData(data)) return;
-    showIncomingCallOverlay(data);
+    if (!response) return;
+    handleNotificationResponse(response.notification.request.content.data);
   });
 
   return () => {

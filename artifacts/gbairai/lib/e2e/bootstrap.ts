@@ -28,7 +28,11 @@ export async function ensureE2eDeviceRegistered(userId: string) {
     const deviceId = await getOrCreateDeviceId();
     const keys = generateDeviceKeys(deviceId);
     await saveDeviceKeys(userId, keys);
-    await registerDeviceOnServer(keys);
+    try {
+      await registerDeviceOnServer(keys);
+    } catch {
+      // Clés locales conservées — ré-enregistrement au prochain envoi.
+    }
   })();
 
   try {

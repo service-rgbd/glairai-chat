@@ -1,8 +1,7 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -40,14 +39,6 @@ import {
   getDeleteMessageTitle,
   getMessageActionAvailability,
 } from "@/lib/message-actions";
-
-function hexToRgba(hex: string, alpha: number) {
-  const normalized = hex.replace("#", "");
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
 
 const HEADER_BODY_HEIGHT = 62;
 
@@ -127,22 +118,6 @@ export default function ChatScreen() {
     ? keyboardHeight + INPUT_DOCK_HEIGHT + 10
     : bottomPad + INPUT_DOCK_HEIGHT;
   const topFadeHeight = topPad + HEADER_BODY_HEIGHT + 28;
-  const bottomFadeHeight = bottomPad + INPUT_DOCK_HEIGHT;
-  const edgeFadeColors = useMemo(
-    () => ({
-      top: [
-        hexToRgba(colors.background, 0.94),
-        hexToRgba(colors.background, 0.55),
-        hexToRgba(colors.background, 0),
-      ] as const,
-      bottom: [
-        hexToRgba(colors.background, 0),
-        hexToRgba(colors.background, 0.55),
-        hexToRgba(colors.background, 0.94),
-      ] as const,
-    }),
-    [colors.background],
-  );
 
   useEffect(() => {
     if (!id) return;
@@ -491,19 +466,6 @@ export default function ChatScreen() {
           }
         />
 
-        <LinearGradient
-          pointerEvents="none"
-          colors={[...edgeFadeColors.top]}
-          locations={[0, 0.55, 1]}
-          style={[styles.edgeFade, { top: 0, height: topFadeHeight }]}
-        />
-        <LinearGradient
-          pointerEvents="none"
-          colors={[...edgeFadeColors.bottom]}
-          locations={[0, 0.45, 1]}
-          style={[styles.edgeFade, { bottom: 0, height: bottomFadeHeight }]}
-        />
-
         <View style={[styles.floatingHeader, { paddingTop: topPad + 8 }]}>
         <View style={styles.headerLeftCluster}>
           <View style={[styles.backPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -695,12 +657,6 @@ const styles = StyleSheet.create({
   messageListFullBleed: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "transparent",
-  },
-  edgeFade: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    zIndex: 1,
   },
   floatingHeader: {
     position: "absolute",

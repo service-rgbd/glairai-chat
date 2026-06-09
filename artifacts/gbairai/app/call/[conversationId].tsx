@@ -337,6 +337,10 @@ export default function CallScreen() {
     return () => clearTimeout(timer);
   }, [hangup, isIncoming, soundPhase]);
 
+  const handleLiveKitConnected = useCallback(() => {
+    setSoundPhase((current) => (current === "ringing" ? "idle" : current));
+  }, []);
+
   const handleRemoteJoined = useCallback(() => {
     if (remoteLeftTimerRef.current) {
       clearTimeout(remoteLeftTimerRef.current);
@@ -427,7 +431,7 @@ export default function CallScreen() {
           otherUserAvatar={otherUser?.avatar ?? null}
           otherUserInitials={otherUser?.initials ?? "??"}
           otherUserColor={otherUser?.color ?? colors.primary}
-          onConnected={() => undefined}
+          onConnected={handleLiveKitConnected}
           onRemoteJoined={handleRemoteJoined}
           onRemoteLeft={handleRemoteLeft}
           onReconnecting={() => setIsReconnecting(true)}

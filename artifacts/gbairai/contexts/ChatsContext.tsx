@@ -53,9 +53,9 @@ import { UserCacheKeys, migrateLegacyUserCache } from "@/lib/offline-cache";
 import { setIncomingCall, clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
 import { shouldAcceptIncomingCall } from "@/lib/call-session-client";
 import { fetchPendingIncomingCall } from "@/lib/calls";
-import { beginPushSetupSession, resetPushSetupSession } from "@/lib/push-setup-session";
 import { countUnreadMissedCalls } from "@/lib/call-badge";
 import { logConversationCall } from "@/lib/call-log";
+import { emitCallSignal } from "@/lib/call-signaling";
 import { isNativeLocalDbEnabled } from "@/lib/local-cache-enabled";
 import { prefetchConversationListMedia } from "@/lib/media-prefetch";
 import { isRealtimeSocketEnabled } from "@/lib/runtime-env";
@@ -894,6 +894,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             console.log("[Gbairai] socket connecté");
           }
           setSocketConnected(true);
+          socket.emit("presence:heartbeat", { isOnline: appStateRef.current === "active" });
           void queryClient.refetchQueries({ queryKey: ["conversations"], stale: true });
           void Promise.all(
             loadedConversationIdsRef.current.map((chatId) =>
@@ -1263,9 +1264,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!authToken || !currentUser?.settings.notificationsEnabled) return;
-    if (!beginPushSetupSession(authToken)) return;
 
-    const registerPush = async () => {
+    const syncPushToken = async () => {
       try {
         const { registerForPushNotificationsAsync } = await import("@/lib/notifications");
         const pushToken = await registerForPushNotificationsAsync();
@@ -1297,13 +1297,16 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    void registerPush();
-  }, [authToken, currentUser?.settings.notificationsEnabled, registerPushDevice]);
+    void syncPushToken();
 
-  useEffect(() => {
-    if (isAuthenticated) return;
-    resetPushSetupSession();
-  }, [isAuthenticated]);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void syncPushToken();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [authToken, currentUser?.settings.notificationsEnabled, registerPushDevice]);
 
   useEffect(() => {
     if (!authToken || !currentUser?.id) return;
@@ -1401,13 +1404,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   }, [e2eDecryptCache]);
 
   useEffect(() => {
-    if (!isE2eEnabled() || !currentUser?.id) return;
+    if (!isE2eEnabled() || !authToken || !currentUser?.id) return;
     void ensureE2eDeviceRegistered(currentUser.id).catch((error) => {
       if (__DEV__) {
         console.warn("[Gbairai] E2E bootstrap:", error);
       }
     });
-  }, [currentUser?.id]);
+  }, [authToken, currentUser?.id]);
 
   const conversationSummaries = conversationsQuery.data?.conversations ?? [];
 
@@ -1629,7 +1632,14 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       if (!conversation || !currentUser?.id) return content;
       const peerUserId = getDirectPeerUserId(conversation, currentUser.id);
       if (!peerUserId) return content;
-      return encryptDirectTextMessage(currentUser.id, peerUserId, content);
+      try {
+        return await encryptDirectTextMessage(currentUser.id, peerUserId, content);
+      } catch (error) {
+        if (__DEV__) {
+          console.warn("[Gbairai] E2E encrypt échoué — envoi en clair:", error);
+        }
+        return content;
+      }
     },
     [conversationById, currentUser?.id],
   );

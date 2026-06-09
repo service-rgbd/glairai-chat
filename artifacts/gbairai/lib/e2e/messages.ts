@@ -10,25 +10,44 @@ export function shouldEncryptDirectText(chatType: string, messageType: string) {
   return isE2eEnabled() && chatType === "direct" && messageType === "text";
 }
 
+function isPeerKeysMissingError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: number }).status === 404
+  );
+}
+
 export async function encryptDirectTextMessage(
   userId: string,
   peerUserId: string,
   plaintext: string,
 ) {
-  const deviceKeys = await ensureE2eDeviceRegistered(userId);
-  if (!deviceKeys) {
-    throw new Error("Clés E2E indisponibles");
-  }
+  try {
+    const deviceKeys = await ensureE2eDeviceRegistered(userId);
+    if (!deviceKeys) {
+      throw new Error("Clés E2E indisponibles");
+    }
 
-  let session = await loadSession(userId, peerUserId);
-  let bundle = null;
-  if (!session) {
-    bundle = await fetchPreKeyBundle(peerUserId);
-  }
+    let session = await loadSession(userId, peerUserId);
+    let bundle = null;
+    if (!session) {
+      bundle = await fetchPreKeyBundle(peerUserId);
+    }
 
-  const result = encryptForPeer(deviceKeys, session, bundle, peerUserId, plaintext);
-  await saveSession(userId, result.session);
-  return result.content;
+    const result = encryptForPeer(deviceKeys, session, bundle, peerUserId, plaintext);
+    await saveSession(userId, result.session);
+    return result.content;
+  } catch (error) {
+    if (isPeerKeysMissingError(error)) {
+      if (__DEV__) {
+        console.warn("[Gbairai] E2E: contact sans clés — envoi en clair");
+      }
+      return plaintext;
+    }
+    throw error;
+  }
 }
 
 export async function decryptDirectTextMessage(
