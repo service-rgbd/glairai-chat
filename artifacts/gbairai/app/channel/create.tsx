@@ -22,6 +22,7 @@ import { uploadChannelImage } from "@/modules/channels/lib/upload-image";
 import { useColors } from "@/hooks/useColors";
 
 const CATEGORIES = ["Organisations", "Sport", "Style De Vie", "Divertissement"];
+const CREATE_ILLUSTRATION = require("@/assets/images/channels/create-illustration.png");
 
 export default function CreateChannelScreen() {
   const colors = useColors();
@@ -251,6 +252,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarHint: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  illustrationWrap: {
+    width: "100%",
+    height: 168,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  illustration: {
+    width: "100%",
+    height: "100%",
+  },
   field: { gap: 8 },
   label: { fontSize: 13, fontFamily: "Inter_500Medium" },
   input: {
