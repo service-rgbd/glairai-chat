@@ -75,6 +75,20 @@ const DEMO_CHANNELS = [
     posts: ["Résumé des matchs du week-end — classement et prochaines affiches."],
   },
   {
+    id: `${DEMO_CHANNEL_PREFIX}mondial_2026`,
+    name: "Mondial 2026 États-Unis",
+    description:
+      "Coupe du monde FIFA 2026 — groupes, matchs, résultats et actualités depuis les États-Unis, le Canada et le Mexique.",
+    category: "Sport",
+    avatarUrl: channelAvatar("mondial-2026.png"),
+    isVerified: true,
+    followersCount: 3_200_000,
+    posts: [
+      "🏆 Coupe du monde 2026 : suivez le calendrier, les équipes qualifiées et les grandes affiches.",
+      "🇺🇸 🇨🇦 🇲🇽 Trois pays hôtes — toute l'actualité de la compétition sur cette chaîne.",
+    ],
+  },
+  {
     id: `${DEMO_CHANNEL_PREFIX}salon_coiffure`,
     name: "Annonce Salon de coiffure",
     description: "Promotions coiffure, tresses, soins capillaires et prise de rendez-vous.",

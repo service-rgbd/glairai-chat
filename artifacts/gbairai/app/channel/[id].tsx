@@ -1,4 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -14,8 +16,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
+import { useAuth } from "@/contexts/AuthContext";
 import { ChannelPostCard } from "@/modules/channels/components/ChannelPostCard";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
+import { uploadChannelImage } from "@/modules/channels/lib/upload-image";
 import type { Channel, ChannelPost } from "@/modules/channels/types";
 import { useColors } from "@/hooks/useColors";
 
@@ -23,6 +27,7 @@ export default function ChannelDetailsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { authToken } = useAuth();
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
     getChannel,
@@ -42,6 +47,7 @@ export default function ChannelDetailsScreen() {
   const [posts, setPosts] = useState<ChannelPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
+  const [pendingImage, setPendingImage] = useState<{ uri: string; mimeType: string } | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
 
@@ -74,12 +80,49 @@ export default function ChannelDetailsScreen() {
     }
   };
 
+  const pickAnnouncementImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.85,
+    });
+
+    if (!result.canceled && result.assets[0]?.uri) {
+      setPendingImage({
+        uri: result.assets[0].uri,
+        mimeType: result.assets[0].mimeType ?? "image/jpeg",
+      });
+    }
+  };
+
   const handlePublish = async () => {
-    if (!channel || !draft.trim()) return;
+    if (!channel) return;
+    const text = draft.trim();
+    if (!text && !pendingImage) return;
+
     setPublishing(true);
     try {
-      await publishPost(channel.id, { content: draft.trim(), mediaType: "text" });
+      let mediaUrl: string | undefined;
+      if (pendingImage && authToken) {
+        mediaUrl = await uploadChannelImage(
+          authToken,
+          pendingImage.uri,
+          pendingImage.mimeType,
+          "chat-image",
+        );
+      }
+
+      await publishPost(channel.id, {
+        content: text,
+        mediaUrl,
+        mediaType: mediaUrl ? "image" : "text",
+      });
       setDraft("");
+      setPendingImage(null);
       const nextPosts = await getChannelPosts(channel.id);
       setPosts(nextPosts);
       await refreshFeed();
@@ -87,6 +130,8 @@ export default function ChannelDetailsScreen() {
       setPublishing(false);
     }
   };
+
+  const canSend = Boolean(draft.trim() || pendingImage);
 
   if (loading || !channel) {
     return (
@@ -160,23 +205,49 @@ export default function ChannelDetailsScreen() {
       </ScrollView>
 
       {canPublish ? (
-        <View style={[styles.composeBar, { borderTopColor: colors.border, backgroundColor: colors.card }]}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Publier sur la chaîne..."
-            placeholderTextColor={colors.mutedForeground}
-            style={[styles.composeInput, { color: colors.text, backgroundColor: colors.background }]}
-            multiline
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: publishing ? 0.7 : 1 }]}
-            onPress={() => void handlePublish()}
-            disabled={publishing || !draft.trim()}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="send" size={18} color="#fff" />
-          </TouchableOpacity>
+        <View style={[styles.composeWrap, { borderTopColor: colors.border, backgroundColor: colors.card }]}>
+          {pendingImage ? (
+            <View style={styles.pendingImageWrap}>
+              <Image source={{ uri: pendingImage.uri }} style={styles.pendingImage} contentFit="cover" />
+              <TouchableOpacity
+                style={styles.pendingImageRemove}
+                onPress={() => setPendingImage(null)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="close" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          <View style={styles.composeBar}>
+            <TouchableOpacity
+              style={[styles.attachBtn, { borderColor: colors.border }]}
+              onPress={() => void pickAnnouncementImage()}
+              disabled={publishing}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="image-outline" size={22} color={colors.primary} />
+            </TouchableOpacity>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Publier une annonce..."
+              placeholderTextColor={colors.mutedForeground}
+              style={[styles.composeInput, { color: colors.text, backgroundColor: colors.background }]}
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: publishing || !canSend ? 0.7 : 1 }]}
+              onPress={() => void handlePublish()}
+              disabled={publishing || !canSend}
+              activeOpacity={0.85}
+            >
+              {publishing ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Ionicons name="send" size={18} color="#fff" />
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       ) : (
         <View style={[styles.followBar, { paddingBottom: bottomPad + 12, backgroundColor: colors.background }]}>
@@ -239,18 +310,51 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_400Regular",
   },
-  composeBar: {
+  composeWrap: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
+    paddingTop: 10,
+    paddingBottom: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  composeBar: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 8,
     paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 24,
-    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  attachBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingImageWrap: {
+    marginHorizontal: 12,
+    width: 88,
+    height: 88,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  pendingImage: {
+    width: "100%",
+    height: "100%",
+  },
+  pendingImageRemove: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   composeInput: {
     flex: 1,
