@@ -27,8 +27,14 @@ export type ActiveCallSession = {
 const RING_TIMEOUT_MS = 15_000;
 const LIVE_SESSION_STATUSES = new Set<CallSessionStatus>(["ringing", "answered"]);
 const STALE_SESSION_MS = 20 * 60 * 1000;
+// Une sonnerie dure 15 s max (RING_TIMEOUT_MS) : au-delà de 60 s, la session
+// "ringing" est forcément fantôme (timer perdu après un redémarrage serveur).
+const RINGING_STALE_MS = 60 * 1000;
 
 function isSessionStale(session: ActiveCallSession) {
+  if (session.status === "ringing") {
+    return Date.now() - session.createdAt > RINGING_STALE_MS;
+  }
   const anchor = session.answeredAt ?? session.createdAt;
   return Date.now() - anchor > STALE_SESSION_MS;
 }
@@ -87,6 +93,20 @@ function purgeStaleSessions() {
     if (!LIVE_SESSION_STATUSES.has(session.status)) continue;
     if (!isSessionStale(session)) continue;
     finalizeCall(session.id, session.status === "answered" ? "ended" : "missed");
+  }
+}
+
+/**
+ * Libère les sessions fantômes quand un utilisateur démarre un nouvel appel :
+ * un nouvel appel sortant prouve que ses appels sortants précédents et tout
+ * appel encore "live" sur la même conversation sont terminés (signal de fin
+ * perdu, crash de l'app, etc.). Évite un faux « Vous êtes déjà en communication ».
+ */
+export function releaseLiveSessionsForNewCall(userId: string, conversationId: string) {
+  for (const session of [...sessions.values()]) {
+    if (!LIVE_SESSION_STATUSES.has(session.status)) continue;
+    if (session.conversationId !== conversationId && session.callerUserId !== userId) continue;
+    finalizeCall(session.id, session.status === "answered" ? "ended" : "cancelled");
   }
 }
 

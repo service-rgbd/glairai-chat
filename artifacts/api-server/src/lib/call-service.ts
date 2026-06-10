@@ -2,7 +2,11 @@ import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 
 import { chatService } from "./chat-service";
 import { CallBusyError, CallForbiddenError, CallNotFoundError } from "./call-errors";
-import { findRingingCallForCalleeFromDb, isUserBusyInDb } from "./call-session-persistence";
+import {
+  findRingingCallForCalleeFromDb,
+  isUserBusyInDb,
+  releaseLiveSessionsForNewCallInDb,
+} from "./call-session-persistence";
 import { logger } from "./logger";
 import {
   getLiveKitConfig,
@@ -18,6 +22,7 @@ import {
   hydrateCallSession,
   isUserBusy,
   markCallAnswered,
+  releaseLiveSessionsForNewCall,
   resolveCallSession,
   scheduleRingTimeout,
 } from "./call-session-store";
@@ -177,6 +182,13 @@ export async function createCallSession(
     .map((participant) => participant.userId)
     .filter((id) => id !== currentUser.id);
 
+  // Un nouvel appel sortant prouve que les sessions précédentes de l'appelant
+  // sont mortes (signal de fin perdu, app fermée, redémarrage serveur) : on les
+  // libère avant le contrôle d'occupation pour éviter les faux
+  // « Vous êtes déjà en communication ».
+  releaseLiveSessionsForNewCall(currentUser.id, conversation.id);
+  await releaseLiveSessionsForNewCallInDb(currentUser.id, conversation.id);
+
   await assertDirectCallsAllowed(currentUser.id, calleeUserIds);
   await assertUsersAvailable(currentUser.id, calleeUserIds);
 
@@ -272,10 +284,24 @@ export async function signalCall(
     throw new CallForbiddenError("Appel non autorisé");
   }
 
+  // Signalisation idempotente : si la session est déjà finalisée (l'autre
+  // participant a signalé en premier), on confirme sans erreur au lieu de
+  // laisser une session bloquée ou de renvoyer un faux échec au client.
+  const endAnsweredSession = async () => {
+    await chatService.publishCallEnded(authToken, session);
+    finalizeCall(session.id, "ended");
+    return { ok: true as const, status: "ended" as const };
+  };
+
   if (input.action === "cancel") {
     if (!isCaller) throw new CallForbiddenError("Seul l'appelant peut annuler l'appel");
+    if (session.status === "answered") {
+      // Course classique : l'appelé décroche pendant que l'appelant annule.
+      // On termine proprement au lieu de laisser la session "answered" bloquée.
+      return endAnsweredSession();
+    }
     if (session.status !== "ringing") {
-      throw new CallNotFoundError("Cet appel n'est plus en cours de sonnerie");
+      return { ok: true as const, status: session.status };
     }
     await chatService.publishCallCancelled(authToken, session);
     finalizeCall(session.id, "cancelled");
@@ -284,12 +310,19 @@ export async function signalCall(
 
   if (input.action === "decline") {
     if (!isCallee) throw new CallForbiddenError("Seul l'appelé peut refuser l'appel");
+    if (session.status === "answered") {
+      return endAnsweredSession();
+    }
     if (session.status !== "ringing") {
-      throw new CallNotFoundError("Cet appel n'est plus en cours de sonnerie");
+      return { ok: true as const, status: session.status };
     }
     await chatService.publishCallDeclined(authToken, session);
     finalizeCall(session.id, "declined");
     return { ok: true as const, status: "declined" as const };
+  }
+
+  if (session.status !== "ringing" && session.status !== "answered") {
+    return { ok: true as const, status: session.status };
   }
 
   await chatService.publishCallEnded(authToken, session);

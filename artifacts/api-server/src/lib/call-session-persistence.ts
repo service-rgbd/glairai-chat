@@ -1,12 +1,18 @@
 import { callSessionsTable, db } from "@workspace/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 
 import type { ActiveCallSession, CallSessionStatus } from "./call-session-store";
 
 const LIVE_STATUSES: CallSessionStatus[] = ["ringing", "answered"];
 const STALE_SESSION_MS = 20 * 60 * 1000;
+// Une sonnerie expire après 15 s côté serveur : une ligne "ringing" de plus de
+// 60 s est forcément orpheline (timer perdu après un redémarrage du serveur).
+const RINGING_STALE_MS = 60 * 1000;
 
 function isRowStale(row: typeof callSessionsTable.$inferSelect) {
+  if (row.status === "ringing") {
+    return Date.now() - row.createdAt.getTime() > RINGING_STALE_MS;
+  }
   const anchor = row.answeredAt?.getTime() ?? row.createdAt.getTime();
   return Date.now() - anchor > STALE_SESSION_MS;
 }
@@ -134,6 +140,26 @@ export async function findRingingCallForCalleeFromDb(userId: string) {
   }
 
   return latest;
+}
+
+/** Pendant un nouvel appel sortant : libère en base les sessions fantômes de l'appelant. */
+export async function releaseLiveSessionsForNewCallInDb(userId: string, conversationId: string) {
+  if (!db) return;
+
+  const scope = or(
+    eq(callSessionsTable.conversationId, conversationId),
+    eq(callSessionsTable.callerUserId, userId),
+  );
+
+  await db
+    .update(callSessionsTable)
+    .set({ status: "ended", updatedAt: new Date() })
+    .where(and(eq(callSessionsTable.status, "answered"), scope));
+
+  await db
+    .update(callSessionsTable)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(and(eq(callSessionsTable.status, "ringing"), scope));
 }
 
 export async function isUserBusyInDb(userId: string, ignoreCallId?: string) {
