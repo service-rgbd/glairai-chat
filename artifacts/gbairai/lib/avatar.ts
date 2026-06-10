@@ -21,7 +21,7 @@ export function resolveAvatarUrl(avatar: string | null | undefined) {
     return trimmed;
   }
 
-  if (trimmed.startsWith("/api/media/public")) {
+  if (trimmed.startsWith("/api/media/public") || trimmed.startsWith("/channel-assets/")) {
     return `${getApiBaseUrl()}${trimmed}`;
   }
 

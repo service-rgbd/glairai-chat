@@ -168,6 +168,25 @@ export default function ChannelsListScreen() {
                 </View>
               ))
             )}
+
+            {!search.trim() ? (
+              <TouchableOpacity
+                style={[styles.createCta, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => router.push("/channel/create")}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="megaphone-outline" size={22} color={colors.primary} />
+                <View style={styles.createCtaText}>
+                  <Text style={[styles.createCtaTitle, { color: colors.text }]}>
+                    Vous avez une activité ou une marque ?
+                  </Text>
+                  <Text style={[styles.createCtaHint, { color: colors.mutedForeground }]}>
+                    Créez votre chaîne — elle apparaîtra ici une fois publiée.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -217,5 +236,28 @@ const styles = StyleSheet.create({
   },
   loader: {
     marginVertical: 24,
+  },
+  createCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 20,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  createCtaText: {
+    flex: 1,
+    gap: 4,
+  },
+  createCtaTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+  createCtaHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_400Regular",
   },
 });

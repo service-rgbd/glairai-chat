@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import { existsSync } from "node:fs";
 import router from "./routes";
+import { getChannelAssetsRoot } from "./lib/channel-assets";
 import { getFluentEmojiAssetsRoot } from "./lib/emoji-assets";
 import { logger } from "./lib/logger";
 
@@ -67,6 +68,22 @@ if (existsSync(emojiAssetsRoot)) {
   );
 } else {
   logger.warn({ emojiAssetsRoot }, "Fluent Emoji assets folder not found");
+}
+
+const channelAssetsRoot = getChannelAssetsRoot();
+if (existsSync(channelAssetsRoot)) {
+  logger.info({ channelAssetsRoot }, "Serving channel avatar assets");
+  app.use(
+    "/channel-assets",
+    (_req, res, next) => {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Cache-Control", "public, max-age=604800");
+      next();
+    },
+    express.static(channelAssetsRoot, { fallthrough: false, index: false }),
+  );
+} else {
+  logger.warn({ channelAssetsRoot }, "Channel assets folder not found");
 }
 
 app.use("/api", router);

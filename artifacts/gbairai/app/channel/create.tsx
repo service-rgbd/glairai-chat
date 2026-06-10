@@ -17,10 +17,9 @@ import { useChannels } from "@/modules/channels/context/ChannelsContext";
 import { useColors } from "@/hooks/useColors";
 
 const CATEGORIES = [
-  "Actualités Et Informations",
+  "Organisations",
   "Sport",
   "Style De Vie",
-  "Organisations",
   "Divertissement",
 ];
 
