@@ -9,7 +9,8 @@
   },
   "scripts": {
     "push": "drizzle-kit push --config ./drizzle.config.ts",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
+    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
+    "seed:channels": "pnpm --dir ../../scripts exec tsx ../lib/db/scripts/seed-channels.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

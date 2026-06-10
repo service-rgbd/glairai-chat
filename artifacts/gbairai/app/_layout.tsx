@@ -20,6 +20,7 @@ import { AuthenticatedNativeCallController } from "@/components/AuthenticatedNat
 import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatsProvider } from "@/contexts/ChatsContext";
+import { ChannelsProvider } from "@/modules/channels/context/ChannelsContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { queryClient } from "@/lib/query-client";
 import { getApiBaseUrl } from "@/lib/api-config";
@@ -51,6 +52,9 @@ function RootStack() {
       <Stack.Screen name="call/[conversationId]" />
       <Stack.Screen name="story/[id]" options={{ presentation: "fullScreenModal" }} />
       <Stack.Screen name="profile/[id]" />
+      <Stack.Screen name="channel/create" />
+      <Stack.Screen name="channel/[id]" />
+      <Stack.Screen name="channel/[id]/settings" />
     </Stack>
   );
 }
@@ -88,7 +92,9 @@ export default function RootLayout() {
             <AuthProvider>
               <PersistedQueryProvider>
                 <ChatsProvider>
-                  <RootAppBody />
+                  <ChannelsProvider>
+                    <RootAppBody />
+                  </ChannelsProvider>
                 </ChatsProvider>
               </PersistedQueryProvider>
             </AuthProvider>

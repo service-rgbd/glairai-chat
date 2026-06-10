@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 
+import { registerChannelSocketHandlers, wireChannelEventPublisher } from "./channel-realtime";
 import { chatService, type RealtimeEvent } from "./chat-service";
 import { logger } from "./logger";
 
@@ -16,6 +17,8 @@ export function attachRealtime(httpServer: HttpServer) {
       io.to(`user:${participantId}`).emit(event.type, event);
     }
   });
+
+  wireChannelEventPublisher(io);
 
   io.use((socket, next) => {
     void (async () => {
@@ -46,6 +49,7 @@ export function attachRealtime(httpServer: HttpServer) {
     const token = socket.data["token"] as string;
     const userId = socket.data["userId"] as string;
     socket.join(`user:${userId}`);
+    registerChannelSocketHandlers(socket);
 
     socket.on("presence:heartbeat", (payload?: { isOnline?: boolean }) => {
       void Promise.resolve(

@@ -10,6 +10,7 @@ import healthRouter from "./health";
 import mediaRouter from "./media";
 import metadataRouter from "./metadata";
 import meRouter from "./me";
+import channelsRouter from "./channels";
 import storiesRouter from "./stories";
 import usersRouter from "./users";
 
@@ -28,5 +29,6 @@ router.use(emojisRouter);
 router.use(mediaRouter);
 router.use(metadataRouter);
 router.use(storiesRouter);
+router.use(channelsRouter);
 
 export default router;

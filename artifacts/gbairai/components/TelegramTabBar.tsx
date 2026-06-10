@@ -22,7 +22,7 @@ const ACTIVE = "#3390EC";
 const BADGE_RED = "#FF3B30";
 const DARK_ICON = "#FFFFFF";
 
-const VISIBLE_TABS = ["calls", "index", "status", "settings"] as const;
+const VISIBLE_TABS = ["channels", "calls", "index", "status", "settings"] as const;
 
 const TAB_ICONS: Record<string, ImageSource> = {
   calls: require("@/assets/images/nav/calls.png"),
@@ -35,6 +35,7 @@ const TAB_ION: Record<
   string,
   { outline: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }
 > = {
+  channels: { outline: "megaphone-outline", filled: "megaphone" },
   calls: { outline: "call-outline", filled: "call" },
   index: { outline: "chatbubbles-outline", filled: "chatbubbles" },
   status: { outline: "disc-outline", filled: "disc" },
@@ -153,6 +154,12 @@ export function TelegramTabBar({ state, descriptors, navigation }: BottomTabBarP
                       size={28}
                       focused={isFocused}
                       style={{ transform: [{ scale: isFocused ? 1.08 : 1 }] }}
+                    />
+                  ) : ion ? (
+                    <Ionicons
+                      name={isFocused ? ion.filled : ion.outline}
+                      size={26}
+                      color={iconColor}
                     />
                   ) : (
                     <Ionicons

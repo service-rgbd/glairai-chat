@@ -429,3 +429,143 @@ export type MessageReceiptRecord = typeof messageReceiptsTable.$inferSelect;
 export type StoryRecord = typeof storiesTable.$inferSelect;
 export type StoryViewRecord = typeof storyViewsTable.$inferSelect;
 export type CallSessionRecord = typeof callSessionsTable.$inferSelect;
+
+export const channelMediaTypeEnum = pgEnum("channel_media_type", ["text", "image", "video"]);
+export const channelAdminRoleEnum = pgEnum("channel_admin_role", ["owner", "admin"]);
+
+export const channelsTable = pgTable(
+  "channels",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    avatarUrl: text("avatar_url"),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    category: text("category"),
+    isVerified: boolean("is_verified").notNull().default(false),
+    isPublic: boolean("is_public").notNull().default(true),
+    followersCount: integer("followers_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    ownerIdx: index("channels_owner_idx").on(table.ownerId),
+    nameIdx: index("channels_name_idx").on(table.name),
+    categoryIdx: index("channels_category_idx").on(table.category),
+    createdAtIdx: index("channels_created_at_idx").on(table.createdAt),
+    followersCountIdx: index("channels_followers_count_idx").on(table.followersCount),
+  }),
+);
+
+export const channelAdminsTable = pgTable(
+  "channel_admins",
+  {
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channelsTable.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    role: channelAdminRoleEnum("role").notNull().default("admin"),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.channelId, table.userId] }),
+    userIdx: index("channel_admins_user_idx").on(table.userId),
+  }),
+);
+
+export const channelFollowersTable = pgTable(
+  "channel_followers",
+  {
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channelsTable.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    followedAt: timestamp("followed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.channelId, table.userId] }),
+    userIdx: index("channel_followers_user_idx").on(table.userId),
+    followedAtIdx: index("channel_followers_followed_at_idx").on(table.followedAt),
+  }),
+);
+
+export const channelPostsTable = pgTable(
+  "channel_posts",
+  {
+    id: text("id").primaryKey(),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channelsTable.id, { onDelete: "cascade" }),
+    authorId: text("author_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    content: text("content").notNull().default(""),
+    mediaUrl: text("media_url"),
+    mediaType: channelMediaTypeEnum("media_type").notNull().default("text"),
+    viewsCount: integer("views_count").notNull().default(0),
+    reactionsCount: integer("reactions_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    channelCreatedIdx: index("channel_posts_channel_created_idx").on(table.channelId, table.createdAt),
+    authorIdx: index("channel_posts_author_idx").on(table.authorId),
+    createdAtIdx: index("channel_posts_created_at_idx").on(table.createdAt),
+  }),
+);
+
+export const channelReactionsTable = pgTable(
+  "channel_reactions",
+  {
+    id: text("id").primaryKey(),
+    postId: text("post_id")
+      .notNull()
+      .references(() => channelPostsTable.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    postUserIdx: uniqueIndex("channel_reactions_post_user_idx").on(table.postId, table.userId),
+    postIdx: index("channel_reactions_post_idx").on(table.postId),
+    userIdx: index("channel_reactions_user_idx").on(table.userId),
+  }),
+);
+
+export const channelPostViewsTable = pgTable(
+  "channel_post_views",
+  {
+    postId: text("post_id")
+      .notNull()
+      .references(() => channelPostsTable.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.postId, table.userId] }),
+    postIdx: index("channel_post_views_post_idx").on(table.postId),
+    userIdx: index("channel_post_views_user_idx").on(table.userId),
+  }),
+);
+
+export const channelRelations = relations(channelsTable, ({ many, one }) => ({
+  owner: one(usersTable, {
+    fields: [channelsTable.ownerId],
+    references: [usersTable.id],
+  }),
+  admins: many(channelAdminsTable),
+  followers: many(channelFollowersTable),
+  posts: many(channelPostsTable),
+}));
+
+export type ChannelRecord = typeof channelsTable.$inferSelect;
+export type ChannelPostRecord = typeof channelPostsTable.$inferSelect;

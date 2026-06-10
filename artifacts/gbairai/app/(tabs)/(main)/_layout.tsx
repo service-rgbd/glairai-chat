@@ -22,6 +22,7 @@ export default function MainTabLayout() {
       }}
     >
       <Tabs.Screen name="contacts" options={{ title: "Contacts", href: null }} />
+      <Tabs.Screen name="channels" options={{ title: "Chaînes" }} />
       <Tabs.Screen name="calls" options={{ title: "Appels" }} />
       <Tabs.Screen name="index" options={{ title: "Échanges" }} />
       <Tabs.Screen name="status" options={{ title: "Statuts" }} />
