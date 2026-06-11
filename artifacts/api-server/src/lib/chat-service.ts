@@ -28,6 +28,12 @@ import {
 import { and, desc, eq, gte, inArray, like, lte, ne, or } from "drizzle-orm";
 import { getCountries, getCountryCallingCode, parsePhoneNumberFromString } from "libphonenumber-js";
 
+import {
+  DEFAULT_GROUP_SETTINGS,
+  parseGroupSettings,
+  serializeGroupSettings,
+  type GroupSettings,
+} from "./group-settings";
 import { logger } from "./logger";
 import { sendOtpSms, shouldExposeOtpDemoCode } from "./sms-service";
 
@@ -201,13 +207,18 @@ export interface ChatService {
       participantUserIds: string[];
       participantPhones: string[];
       title: string | null;
+      groupSettings?: Partial<GroupSettings>;
     },
   ): Awaitable<ConversationSummary>;
   getConversation(token: string, conversationId: string): Awaitable<ConversationSummary>;
   updateConversation(
     token: string,
     conversationId: string,
-    input: { title?: string | null; avatarUrl?: string | null },
+    input: {
+      title?: string | null;
+      avatarUrl?: string | null;
+      groupSettings?: Partial<GroupSettings>;
+    },
   ): Awaitable<ConversationSummary>;
   addConversationMembers(
     token: string,
@@ -304,6 +315,7 @@ export interface ChatService {
       callerName: string;
       callerAvatarUrl?: string | null;
       callId: string;
+      targetUserIds?: string[];
     },
   ): Awaitable<void>;
   assertDirectCallAllowed(userA: string, userB: string): Awaitable<void>;
@@ -1838,6 +1850,7 @@ class DatabaseChatService implements ChatService {
       participantUserIds: string[];
       participantPhones: string[];
       title: string | null;
+      groupSettings?: Partial<GroupSettings>;
     },
   ) {
     const currentUser = await this.requireUserByToken(token);
@@ -1877,6 +1890,13 @@ class DatabaseChatService implements ChatService {
 
     const conversationId = randomId("conv");
     const now = new Date();
+    const groupSettings =
+      type === "group"
+        ? serializeGroupSettings({
+            ...DEFAULT_GROUP_SETTINGS,
+            ...input.groupSettings,
+          })
+        : null;
 
     await db!.insert(conversationsTable).values({
       id: conversationId,
@@ -1885,6 +1905,7 @@ class DatabaseChatService implements ChatService {
       createdBy: currentUser.id,
       createdAt: now,
       updatedAt: now,
+      groupSettings,
     });
 
     await db!.insert(conversationMembersTable).values(
@@ -1915,7 +1936,11 @@ class DatabaseChatService implements ChatService {
   async updateConversation(
     token: string,
     conversationId: string,
-    input: { title?: string | null; avatarUrl?: string | null },
+    input: {
+      title?: string | null;
+      avatarUrl?: string | null;
+      groupSettings?: Partial<GroupSettings>;
+    },
   ) {
     const user = await this.requireUserByToken(token);
     const conversation = await this.requireConversationMembership(conversationId, user.id);
@@ -1927,9 +1952,16 @@ class DatabaseChatService implements ChatService {
       throw new Error("Seul l'administrateur du groupe peut modifier ces informations");
     }
 
+    const [conversationRecord] = await db!
+      .select()
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, conversationId))
+      .limit(1);
+
     const updates: {
       title?: string | null;
       avatarUrl?: string | null;
+      groupSettings?: ReturnType<typeof serializeGroupSettings>;
       updatedAt: Date;
     } = { updatedAt: new Date() };
 
@@ -1938,6 +1970,13 @@ class DatabaseChatService implements ChatService {
     }
     if (input.avatarUrl !== undefined) {
       updates.avatarUrl = input.avatarUrl?.trim() ? input.avatarUrl.trim() : null;
+    }
+    if (input.groupSettings !== undefined) {
+      const current = parseGroupSettings(conversationRecord?.groupSettings);
+      updates.groupSettings = serializeGroupSettings({
+        ...current,
+        ...input.groupSettings,
+      });
     }
 
     await db!
@@ -1967,6 +2006,20 @@ class DatabaseChatService implements ChatService {
 
     if (conversation.type !== "group") {
       throw new Error("Impossible d'ajouter des membres à une conversation directe");
+    }
+
+    const [conversationRecord] = await db!
+      .select({ groupSettings: conversationsTable.groupSettings, createdBy: conversationsTable.createdBy })
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, conversationId))
+      .limit(1);
+    const groupSettings = parseGroupSettings(conversationRecord?.groupSettings);
+    const isAdmin = conversationRecord?.createdBy === user.id;
+    if (!isAdmin && groupSettings.accessMode === "closed") {
+      throw new Error("Seul l'administrateur peut ajouter des membres dans ce groupe fermé");
+    }
+    if (!isAdmin && groupSettings.accessMode === "invite") {
+      throw new Error("Utilisez le lien d'invitation pour rejoindre ce groupe");
     }
 
     const existingMemberIds = new Set(await this.getConversationParticipantIds(conversationId));
@@ -2342,7 +2395,7 @@ class DatabaseChatService implements ChatService {
       await db!
         .update(conversationsTable)
         .set({ updatedAt: createdAt })
-        .where(eq(conversationsTable.id, conversation.id));
+        .where(eq(conversationsTable.id, conversationId));
 
       if (memberships.length > 0) {
         await db!
@@ -3068,6 +3121,7 @@ class DatabaseChatService implements ChatService {
       callerName: string;
       callerAvatarUrl?: string | null;
       callId: string;
+      targetUserIds?: string[];
     },
   ) {
     const user = await this.requireUserByToken(token);
@@ -3087,7 +3141,10 @@ class DatabaseChatService implements ChatService {
       callType: input.type,
     });
 
-    const recipientIds = participantIds.filter((id) => id !== input.callerUserId);
+    const allRecipients = participantIds.filter((id) => id !== input.callerUserId);
+    const recipientIds = input.targetUserIds?.length
+      ? allRecipients.filter((id) => input.targetUserIds!.includes(id))
+      : allRecipients;
     if (!recipientIds.length) {
       return;
     }
@@ -3644,6 +3701,10 @@ class DatabaseChatService implements ChatService {
       participants,
       unreadCount: membership.unreadCount,
       isArchived: Boolean(membership.archivedAt),
+      groupSettings:
+        conversation.type === "group"
+          ? parseGroupSettings(conversation.groupSettings)
+          : undefined,
       lastMessage: lastMessage ? await this.toMessage(conversationId, lastMessage.id) : undefined,
       lastReadMessageId: membership.lastReadMessageId,
     };

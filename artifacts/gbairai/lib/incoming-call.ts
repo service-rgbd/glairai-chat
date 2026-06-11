@@ -20,7 +20,7 @@ const uiModeListeners = new Set<UiModeListener>();
 
 export function setIncomingCall(
   call: IncomingCallPayload | null,
-  options?: { skipNativeDisplay?: boolean },
+  options?: { skipNativeDisplay?: boolean; skipNativeEnd?: boolean },
 ) {
   pendingCall = call;
   callKitManaged = call != null && options?.skipNativeDisplay === true;
@@ -30,15 +30,25 @@ export function setIncomingCall(
       for (const listener of uiModeListeners) {
         listener(uiMode);
       }
-      void import("@/lib/call-system-ui").then(({ displayNativeIncomingCall }) => {
-        void displayNativeIncomingCall(call);
+      void import("@/lib/call-system-ui").then(({ displayNativeIncomingCall, endNativeCall }) => {
+        if (pendingCall?.callId === call.callId) {
+          void displayNativeIncomingCall(call).then((displayed) => {
+            if (displayed && pendingCall?.callId !== call.callId) {
+              endNativeCall(call.callId);
+            }
+          });
+          return;
+        }
+        endNativeCall(call.callId);
       });
     }
   } else {
     callKitManaged = false;
-    void import("@/lib/call-system-ui").then(({ endAllNativeCalls }) => {
-      endAllNativeCalls();
-    });
+    if (!options?.skipNativeEnd) {
+      void import("@/lib/call-system-ui").then(({ endAllNativeCalls }) => {
+        endAllNativeCalls();
+      });
+    }
   }
   for (const listener of listeners) {
     listener(pendingCall);
@@ -80,8 +90,11 @@ export function subscribeIncomingCallUiMode(listener: UiModeListener) {
   };
 }
 
-export function clearIncomingCallIfMatches(callId?: string | null) {
+export function clearIncomingCallIfMatches(
+  callId?: string | null,
+  options?: { skipNativeEnd?: boolean },
+) {
   if (!pendingCall) return;
   if (callId && pendingCall.callId !== callId) return;
-  setIncomingCall(null);
+  setIncomingCall(null, options);
 }

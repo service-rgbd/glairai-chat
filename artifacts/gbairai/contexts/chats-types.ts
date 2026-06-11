@@ -1,4 +1,5 @@
 import type { ContactMatch, GroupInvite, GroupInvitePreview } from "@workspace/api-client-react";
+import type { GroupSettings } from "@/lib/group-settings";
 
 export interface GUser {
   id: string;
@@ -37,6 +38,7 @@ export interface GChat {
   createdBy?: string;
   unreadCount: number;
   isArchived?: boolean;
+  groupSettings?: GroupSettings;
   lastMessage?: GMessage;
 }
 
@@ -143,10 +145,18 @@ export interface ChatsContextType {
   getComposeContacts: (options?: { force?: boolean }) => Promise<ComposeContactOption[]>;
   updateSavedContactName: (phone: string, contactName: string) => Promise<void>;
   startConversationWithUser: (userId: string) => Promise<string>;
-  startConversationWithUsers: (userIds: string[], title?: string | null) => Promise<string>;
+  startConversationWithUsers: (
+    userIds: string[],
+    title?: string | null,
+    groupSettings?: GroupSettings,
+  ) => Promise<string>;
   updateGroup: (
     conversationId: string,
-    input: { title?: string | null; avatarUrl?: string | null },
+    input: {
+      title?: string | null;
+      avatarUrl?: string | null;
+      groupSettings?: Partial<GroupSettings>;
+    },
   ) => Promise<void>;
   addGroupMembers: (conversationId: string, userIds: string[]) => Promise<void>;
   removeGroupMember: (conversationId: string, userId: string) => Promise<void>;

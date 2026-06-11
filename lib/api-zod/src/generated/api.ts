@@ -222,13 +222,19 @@ export const ListConversationsResponse = zod.object({
 })
 
 
+export const GroupSettingsBody = zod.object({
+  "membersCanSendMedia": zod.boolean().optional(),
+  "accessMode": zod.enum(['closed', 'invite', 'open']).optional(),
+})
+
 /**
  * @summary Create or reuse a conversation
  */
 export const CreateConversationBody = zod.object({
   "participantUserIds": zod.array(zod.string()),
   "participantPhones": zod.array(zod.string()),
-  "title": zod.string().nullable()
+  "title": zod.string().nullable(),
+  "groupSettings": GroupSettingsBody.optional(),
 })
 
 export const CreateConversationResponse = zod.object({
@@ -357,7 +363,8 @@ export const UpdateConversationParams = zod.object({
 
 export const UpdateConversationBody = zod.object({
   "title": zod.string().nullish(),
-  "avatarUrl": zod.string().nullish()
+  "avatarUrl": zod.string().nullish(),
+  "groupSettings": GroupSettingsBody.optional(),
 })
 
 export const UpdateConversationResponse = zod.object({
@@ -832,7 +839,8 @@ export const ListSupportedCountriesResponse = zod.object({
  */
 export const CreateCallTokenBody = zod.object({
   "conversationId": zod.string(),
-  "type": zod.enum(['audio', 'video'])
+  "type": zod.enum(['audio', 'video']),
+  "calleeUserIds": zod.array(zod.string()).optional(),
 })
 
 export const CreateCallTokenResponse = zod.object({

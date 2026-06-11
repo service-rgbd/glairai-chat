@@ -3,13 +3,15 @@ import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
   useAudioRecorder,
   useAudioRecorderState,
 } from "expo-audio";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -38,6 +40,104 @@ import { runWithUploadStatus, type UploadStatus } from "@/lib/upload-status";
 import { getEmoji3dPayloadFromContent, type Emoji3dMessagePayload } from "@/lib/emoji-messages";
 import { getChatEmoji3dImageUrl } from "@/lib/story-reactions";
 
+const PREVIEW_WAVEFORM_BARS = [
+  0.28, 0.62, 0.44, 0.86, 0.52, 0.74, 0.38, 0.68, 0.56, 0.42, 0.78, 0.48, 0.66, 0.34, 0.58,
+  0.72, 0.46, 0.64,
+];
+
+type PendingAudioPreview = {
+  uri: string;
+  durationSeconds: number;
+  mimeType: string;
+};
+
+function formatVoiceDuration(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.round(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function PendingVoicePreview({ audio }: { audio: PendingAudioPreview }) {
+  const colors = useColors();
+  const player = useAudioPlayer(audio.uri, { updateInterval: 80 });
+  const playerStatus = useAudioPlayerStatus(player);
+
+  useEffect(() => {
+    void setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+    });
+  }, [audio.uri]);
+
+  const totalDuration = useMemo(() => {
+    if (playerStatus.duration && playerStatus.duration > 0) {
+      return playerStatus.duration;
+    }
+    return audio.durationSeconds > 0 ? audio.durationSeconds : 0;
+  }, [audio.durationSeconds, playerStatus.duration]);
+
+  const currentTime = Math.max(0, playerStatus.currentTime || 0);
+  const playbackProgress = totalDuration > 0 ? Math.min(currentTime / totalDuration, 1) : 0;
+  const displaySeconds = player.playing ? currentTime : totalDuration || audio.durationSeconds;
+
+  const togglePlayback = () => {
+    if (player.playing) {
+      player.pause();
+      return;
+    }
+    if (
+      playerStatus.duration &&
+      playerStatus.currentTime >= playerStatus.duration &&
+      playerStatus.duration > 0
+    ) {
+      void player.seekTo(0);
+    }
+    player.play();
+  };
+
+  return (
+    <View style={styles.voicePreviewBody}>
+      <TouchableOpacity
+        style={[styles.voicePreviewPlayBtn, { backgroundColor: colors.primary }]}
+        onPress={togglePlayback}
+        activeOpacity={0.85}
+        accessibilityLabel={player.playing ? "Pause" : "Écouter"}
+      >
+        <Ionicons name={player.playing ? "pause" : "play"} size={32} color="#fff" />
+      </TouchableOpacity>
+
+      <View style={styles.voicePreviewWaveWrap}>
+        <View style={styles.voicePreviewWaveformRow}>
+          {PREVIEW_WAVEFORM_BARS.map((value, index) => {
+            const barEnd = (index + 1) / PREVIEW_WAVEFORM_BARS.length;
+            const isPlayed = barEnd <= playbackProgress;
+            return (
+              <View
+                key={`preview-bar-${index}`}
+                style={[
+                  styles.voicePreviewWaveformBar,
+                  {
+                    height: 8 + value * 28,
+                    backgroundColor: isPlayed ? colors.primary : colors.border,
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
+        <Text style={[styles.voicePreviewDuration, { color: colors.text }]}>
+          {formatVoiceDuration(displaySeconds)}
+        </Text>
+      </View>
+
+      <Text style={[styles.voicePreviewHint, { color: colors.mutedForeground }]}>
+        Réécoutez avant d'envoyer
+      </Text>
+    </View>
+  );
+}
+
 interface ChatInputProps {
   onSend: (text: string) => void;
   onSendEmoji3d?: (payload: Emoji3dMessagePayload) => void;
@@ -55,6 +155,7 @@ interface ChatInputProps {
   bottomInset?: number;
   conversationId?: string;
   autoStartVoiceRecording?: boolean;
+  allowMedia?: boolean;
 }
 
 export function ChatInput({
@@ -67,6 +168,7 @@ export function ChatInput({
   bottomInset = 0,
   conversationId,
   autoStartVoiceRecording = false,
+  allowMedia = true,
 }: ChatInputProps) {
   const colors = useColors();
   const { authToken } = useAuth();
@@ -249,35 +351,44 @@ export function ChatInput({
     });
   };
 
+  const cancelRecording = async () => {
+    if (!recorderState.isRecording) return;
+    setAudioError(null);
+    try {
+      await recorder.stop();
+    } catch {
+      // Ignorer : l'enregistrement est abandonné.
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const finishRecordingToPreview = async () => {
+    if (!recorderState.isRecording) return;
+
+    try {
+      setAudioError(null);
+      await recorder.stop();
+      const uri = recorder.uri;
+      const durationSeconds = Math.max(1, Math.round(recorder.currentTime || recorderState.durationMillis / 1000));
+
+      if (!uri) {
+        throw new Error("Enregistrement audio introuvable");
+      }
+
+      setPendingAudio({ uri, durationSeconds, mimeType: "audio/mp4" });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      setAudioError(
+        error instanceof Error ? error.message : "Impossible de terminer l'enregistrement",
+      );
+    }
+  };
+
   const toggleRecording = async () => {
     if (!onSendAudio) return;
 
     if (recorderState.isRecording) {
-      try {
-        setAudioError(null);
-        await recorder.stop();
-        const uri = recorder.uri;
-        const durationSeconds = Math.max(1, recorder.currentTime || 0);
-
-        if (!uri) {
-          throw new Error("Enregistrement audio introuvable");
-        }
-
-        const mimeType = "audio/mp4";
-        const recordedAudio = { uri, durationSeconds, mimeType };
-        await uploadRecordedAudio(recordedAudio);
-        setPendingAudio(null);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch (error) {
-        const uri = recorder.uri;
-        const durationSeconds = Math.max(1, recorder.currentTime || 0);
-        if (uri) {
-          setPendingAudio({ uri, durationSeconds, mimeType: "audio/mp4" });
-        }
-        setAudioError(
-          error instanceof Error ? error.message : "Upload audio impossible pour le moment",
-        );
-      }
+      await finishRecordingToPreview();
       return;
     }
 
@@ -332,20 +443,22 @@ export function ChatInput({
           </View>
         ) : null}
         <View style={styles.inputRow}>
-          <TouchableOpacity
-            style={[styles.circleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-            activeOpacity={0.7}
-            onPress={() => {
-              void pickAttachment();
-            }}
-            disabled={isUploading || isPreparingPreview}
-          >
-            {isPreparingPreview ? (
-              <ActivityIndicator size="small" color={colors.text} />
-            ) : (
-              <Feather name="paperclip" size={20} color={colors.text} />
-            )}
-          </TouchableOpacity>
+          {allowMedia ? (
+            <TouchableOpacity
+              style={[styles.circleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              activeOpacity={0.7}
+              onPress={() => {
+                void pickAttachment();
+              }}
+              disabled={isUploading || isPreparingPreview}
+            >
+              {isPreparingPreview ? (
+                <ActivityIndicator size="small" color={colors.text} />
+              ) : (
+                <Feather name="paperclip" size={20} color={colors.text} />
+              )}
+            </TouchableOpacity>
+          ) : null}
           <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {recorderState.isRecording ? (
               <View style={styles.recordingBlock}>
@@ -354,6 +467,15 @@ export function ChatInput({
                   <Text style={[styles.recordingText, { color: colors.text }]}>
                     Enregistrement... {recordingSeconds}s
                   </Text>
+                  <TouchableOpacity
+                    onPress={() => void cancelRecording()}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={[styles.recordingCancelText, { color: colors.destructive }]}>
+                      Annuler
+                    </Text>
+                  </TouchableOpacity>
                 </View>
                 <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
                   <View
@@ -441,7 +563,7 @@ export function ChatInput({
             >
               <Ionicons name="send" size={18} color={colors.primary} style={{ marginLeft: 2 }} />
             </TouchableOpacity>
-          ) : (
+          ) : allowMedia ? (
             <TouchableOpacity
               style={[
                 styles.circleBtn,
@@ -459,14 +581,92 @@ export function ChatInput({
               disabled={isUploading}
             >
               <Feather
-                name={recorderState.isRecording ? "stop-circle" : "mic"}
+                name={recorderState.isRecording ? "check" : "mic"}
                 size={20}
-                color={recorderState.isRecording ? colors.destructive : colors.text}
+                color={recorderState.isRecording ? colors.primary : colors.text}
               />
             </TouchableOpacity>
-          )}
+          ) : null}
         </View>
       </View>
+
+      <Modal
+        visible={Boolean(pendingAudio) && !recorderState.isRecording}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        onRequestClose={() => {
+          if (!isUploading) setPendingAudio(null);
+        }}
+      >
+        <View style={[styles.previewRoot, { backgroundColor: colors.background }]}>
+          <View style={styles.previewHeader}>
+            <TouchableOpacity
+              style={styles.previewIconBtn}
+              onPress={() => setPendingAudio(null)}
+              disabled={isUploading}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="close" size={26} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={[styles.previewTitle, { color: colors.text }]}>Message vocal</Text>
+            <View style={styles.previewIconBtn} />
+          </View>
+
+          {pendingAudio ? <PendingVoicePreview audio={pendingAudio} /> : null}
+
+          {uploadStatus ? (
+            <View style={styles.previewUploadWrap}>
+              <UploadProgressBanner status={uploadStatus} />
+            </View>
+          ) : null}
+
+          {audioError ? (
+            <Text style={[styles.voicePreviewError, { color: colors.destructive }]}>{audioError}</Text>
+          ) : null}
+
+          <View style={styles.previewActions}>
+            <TouchableOpacity
+              style={[styles.previewSecondaryBtn, { borderColor: colors.border }]}
+              onPress={() => {
+                setPendingAudio(null);
+                setAudioError(null);
+              }}
+              disabled={isUploading}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.previewSecondaryText, { color: colors.text }]}>Annuler</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.previewSendBtn, { backgroundColor: colors.primary, opacity: isUploading ? 0.75 : 1 }]}
+              disabled={!pendingAudio || isUploading}
+              onPress={() => {
+                if (!pendingAudio) return;
+                setAudioError(null);
+                void uploadRecordedAudio(pendingAudio)
+                  .then(() => {
+                    setPendingAudio(null);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  })
+                  .catch((error) => {
+                    setAudioError(
+                      error instanceof Error ? error.message : "Impossible d'envoyer le message vocal",
+                    );
+                  });
+              }}
+              activeOpacity={0.85}
+            >
+              {isUploading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Text style={styles.previewSendText}>Envoyer</Text>
+                  <Ionicons name="send" size={18} color="#fff" />
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={Boolean(pendingImage)}
@@ -743,8 +943,13 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   recordingText: {
+    flex: 1,
     fontSize: 14,
     fontFamily: "Inter_500Medium",
+  },
+  recordingCancelText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
   progressTrack: {
     height: 4,
@@ -845,5 +1050,54 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
+  },
+  voicePreviewBody: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    gap: 20,
+  },
+  voicePreviewPlayBtn: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: 4,
+  },
+  voicePreviewWaveWrap: {
+    width: "100%",
+    maxWidth: 320,
+    alignItems: "center",
+    gap: 12,
+  },
+  voicePreviewWaveformRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "center",
+    gap: 3,
+    height: 40,
+    width: "100%",
+  },
+  voicePreviewWaveformBar: {
+    width: 4,
+    borderRadius: 999,
+  },
+  voicePreviewDuration: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+  },
+  voicePreviewHint: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
+  voicePreviewError: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
 });

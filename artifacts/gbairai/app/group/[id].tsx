@@ -1,7 +1,7 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -30,6 +30,12 @@ import {
   getGroupDisplayInitials,
   getGroupMemberCountLabel,
 } from "@/lib/group-utils";
+import {
+  DEFAULT_GROUP_SETTINGS,
+  groupAccessModeLabel,
+  type GroupAccessMode,
+  type GroupSettings,
+} from "@/lib/group-settings";
 import {
   createMediaUploadTarget,
   resolveMediaUrl,
@@ -69,6 +75,7 @@ export default function GroupInfoScreen() {
   const [addMembersContacts, setAddMembersContacts] = useState<ComposeContactOption[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [addMembersLoading, setAddMembersLoading] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<GroupSettings>(DEFAULT_GROUP_SETTINGS);
 
   const avatarUri = useCachedMediaUrl(chat?.avatarUrl ?? null);
   const initials = chat
@@ -91,6 +98,11 @@ export default function GroupInfoScreen() {
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
 
+  useEffect(() => {
+    if (!chat?.groupSettings) return;
+    setSettingsDraft(chat.groupSettings);
+  }, [chat?.groupSettings, chat?.id]);
+
   if (!chat || chat.type !== "group") {
     return (
       <View style={[styles.root, { backgroundColor: colors.background, paddingTop: topPad }]}>
@@ -100,6 +112,28 @@ export default function GroupInfoScreen() {
       </View>
     );
   }
+
+  const groupSettings = chat.groupSettings ?? DEFAULT_GROUP_SETTINGS;
+  const canAddMembers = isAdmin || groupSettings.accessMode === "open";
+  const canShareInvite = isAdmin || groupSettings.accessMode !== "closed";
+
+  const saveGroupSettings = async (next: Partial<GroupSettings>) => {
+    if (!id || !isAdmin) return;
+    const merged = { ...settingsDraft, ...next };
+    setSettingsDraft(merged);
+    setIsSaving(true);
+    try {
+      await updateGroup(id, { groupSettings: merged });
+    } catch (error) {
+      setSettingsDraft(chat.groupSettings ?? DEFAULT_GROUP_SETTINGS);
+      Alert.alert(
+        "Modification impossible",
+        error instanceof Error ? error.message : "Impossible de mettre à jour les permissions.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const openAddMembers = async () => {
     setAddMembersOpen(true);
@@ -313,33 +347,88 @@ export default function GroupInfoScreen() {
             </Text>
 
             <View style={styles.actionsRow}>
-              <TouchableOpacity
-                style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                onPress={() => {
-                  void openAddMembers();
-                }}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="person-add-outline" size={22} color={colors.primary} />
-                <Text style={[styles.actionLabel, { color: colors.text }]}>Ajouter</Text>
-              </TouchableOpacity>
+              {canAddMembers ? (
+                <TouchableOpacity
+                  style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => {
+                    void openAddMembers();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="person-add-outline" size={22} color={colors.primary} />
+                  <Text style={[styles.actionLabel, { color: colors.text }]}>Ajouter</Text>
+                </TouchableOpacity>
+              ) : null}
 
-              <TouchableOpacity
-                style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                onPress={() => {
-                  void shareInviteLink();
-                }}
-                activeOpacity={0.8}
-                disabled={isInviteLoading}
-              >
-                {isInviteLoading ? (
-                  <ActivityIndicator color={colors.primary} />
-                ) : (
-                  <Feather name="link" size={22} color={colors.primary} />
-                )}
-                <Text style={[styles.actionLabel, { color: colors.text }]}>Inviter</Text>
-              </TouchableOpacity>
+              {canShareInvite ? (
+                <TouchableOpacity
+                  style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => {
+                    void shareInviteLink();
+                  }}
+                  activeOpacity={0.8}
+                  disabled={isInviteLoading}
+                >
+                  {isInviteLoading ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Feather name="link" size={22} color={colors.primary} />
+                  )}
+                  <Text style={[styles.actionLabel, { color: colors.text }]}>Inviter</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
+
+            {isAdmin ? (
+              <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.settingsTitle, { color: colors.text }]}>Permissions du groupe</Text>
+
+                <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>
+                  Accès et invitations
+                </Text>
+                {(["closed", "invite", "open"] as GroupAccessMode[]).map((mode) => {
+                  const selected = settingsDraft.accessMode === mode;
+                  return (
+                    <TouchableOpacity
+                      key={mode}
+                      style={[styles.settingsOption, { borderColor: colors.border }]}
+                      onPress={() => {
+                        void saveGroupSettings({ accessMode: mode });
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons
+                        name={selected ? "radio-button-on" : "radio-button-off"}
+                        size={20}
+                        color={selected ? colors.primary : colors.mutedForeground}
+                      />
+                      <Text style={[styles.settingsOptionText, { color: colors.text }]}>
+                        {groupAccessModeLabel(mode)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                <TouchableOpacity
+                  style={[styles.settingsToggleRow, { borderTopColor: colors.border }]}
+                  onPress={() => {
+                    void saveGroupSettings({
+                      membersCanSendMedia: !settingsDraft.membersCanSendMedia,
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.settingsOptionText, { color: colors.text }]}>
+                    Les membres peuvent envoyer des médias
+                  </Text>
+                  <Ionicons
+                    name={settingsDraft.membersCanSendMedia ? "toggle" : "toggle-outline"}
+                    size={28}
+                    color={settingsDraft.membersCanSendMedia ? colors.primary : colors.mutedForeground}
+                  />
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
               {members.length} membres
@@ -539,6 +628,33 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionLabel: { fontSize: 14, fontFamily: "Inter_500Medium" },
+  settingsCard: {
+    width: "100%",
+    marginTop: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+  },
+  settingsTitle: { fontSize: 16, fontFamily: "Inter_700Bold", marginBottom: 4 },
+  settingsLabel: { fontSize: 12, fontFamily: "Inter_600SemiBold", textTransform: "uppercase" },
+  settingsOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  settingsOptionText: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular" },
+  settingsToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingTop: 12,
+    marginTop: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   sectionTitle: {
     alignSelf: "flex-start",
     marginTop: 18,

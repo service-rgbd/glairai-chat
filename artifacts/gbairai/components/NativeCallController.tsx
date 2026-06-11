@@ -38,7 +38,8 @@ export function NativeCallController() {
           failed: false,
           duration: null,
         });
-        clearIncomingCallIfMatches(incoming.callId);
+        clearIncomingCallIfMatches(incoming.callId, { skipNativeEnd: true });
+        endNativeCall(incoming.callId);
         router.push({
           pathname: "/call/[conversationId]",
           params: {

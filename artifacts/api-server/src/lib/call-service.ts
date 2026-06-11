@@ -139,7 +139,13 @@ function assertCallParticipant(
 
 export async function createCallSession(
   authToken: string,
-  input: { conversationId: string; type: CallType; role?: CallRole; callId?: string },
+  input: {
+    conversationId: string;
+    type: CallType;
+    role?: CallRole;
+    callId?: string;
+    calleeUserIds?: string[];
+  },
 ) {
   const role = input.role ?? "caller";
   const currentUser = await chatService.getCurrentUser(authToken);
@@ -178,9 +184,15 @@ export async function createCallSession(
   }
 
   const conversation = await chatService.getConversation(authToken, input.conversationId);
-  const calleeUserIds = conversation.participants
+  const allCalleeIds = conversation.participants
     .map((participant) => participant.userId)
     .filter((id) => id !== currentUser.id);
+  const calleeUserIds =
+    input.calleeUserIds?.filter((id) => allCalleeIds.includes(id)) ?? allCalleeIds;
+
+  if (!calleeUserIds.length) {
+    throw new CallForbiddenError("Aucun participant à appeler");
+  }
 
   // Un nouvel appel sortant prouve que les sessions précédentes de l'appelant
   // sont mortes (signal de fin perdu, app fermée, redémarrage serveur) : on les
@@ -189,7 +201,17 @@ export async function createCallSession(
   releaseLiveSessionsForNewCall(currentUser.id, conversation.id);
   await releaseLiveSessionsForNewCallInDb(currentUser.id, conversation.id);
 
-  await assertDirectCallsAllowed(currentUser.id, calleeUserIds);
+  if (conversation.type === "direct") {
+    await assertDirectCallsAllowed(currentUser.id, calleeUserIds);
+  } else {
+    for (const calleeId of calleeUserIds) {
+      try {
+        await chatService.assertDirectCallAllowed(currentUser.id, calleeId);
+      } catch {
+        throw new CallForbiddenError("Appel impossible avec un des participants");
+      }
+    }
+  }
   await assertUsersAvailable(currentUser.id, calleeUserIds);
 
   const activeCall = storeCreateCallSession({
@@ -215,6 +237,7 @@ export async function createCallSession(
       callerName: currentUser.name,
       callerAvatarUrl: currentUser.avatarUrl,
       callId: activeCall.id,
+      targetUserIds: calleeUserIds,
     });
   } catch (error) {
     logger.warn(

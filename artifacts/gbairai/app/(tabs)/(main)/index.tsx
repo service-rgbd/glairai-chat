@@ -29,6 +29,12 @@ import { StoryRing } from "@/components/StoryRing";
 import { useAuth } from "@/contexts/AuthContext";
 import type { GChat, GUser, ComposeContactOption } from "@/contexts/chats-types";
 import { useChats } from "@/contexts/chats-context-ref";
+import {
+  DEFAULT_GROUP_SETTINGS,
+  groupAccessModeLabel,
+  type GroupAccessMode,
+  type GroupSettings,
+} from "@/lib/group-settings";
 import { useColors } from "@/hooks/useColors";
 import {
   isArchivedAccessEnabled,
@@ -76,6 +82,7 @@ export default function ChatsScreen() {
   const [composerSearch, setComposerSearch] = useState("");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [groupTitle, setGroupTitle] = useState("");
+  const [newGroupSettings, setNewGroupSettings] = useState<GroupSettings>(DEFAULT_GROUP_SETTINGS);
   const [composerContacts, setComposerContacts] = useState<ComposeContactOption[]>([]);
   const [composerLoading, setComposerLoading] = useState(false);
   const getComposeContactsRef = useRef(getComposeContacts);
@@ -388,6 +395,7 @@ export default function ChatsScreen() {
       setComposerSearch("");
       setSelectedUserIds([]);
       setGroupTitle("");
+      setNewGroupSettings(DEFAULT_GROUP_SETTINGS);
       return;
     }
 
@@ -440,12 +448,14 @@ export default function ChatsScreen() {
         : await startConversationWithUsers(
             selectedUserIds,
             groupTitle.trim() || "Nouveau groupe",
+            newGroupSettings,
           );
 
     setComposerOpen(false);
     setComposerSearch("");
     setSelectedUserIds([]);
     setGroupTitle("");
+    setNewGroupSettings(DEFAULT_GROUP_SETTINGS);
     router.push(`/chat/${conversationId}`);
   };
 
@@ -637,13 +647,54 @@ export default function ChatsScreen() {
           <SearchBar value={composerSearch} onChangeText={setComposerSearch} placeholder="Rechercher un contact..." />
 
           {selectedUserIds.length > 1 ? (
-            <TextInput
-              style={[styles.groupInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-              placeholder="Nom du groupe ou canal"
-              placeholderTextColor={colors.mutedForeground}
-              value={groupTitle}
-              onChangeText={setGroupTitle}
-            />
+            <>
+              <TextInput
+                style={[styles.groupInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                placeholder="Nom du groupe"
+                placeholderTextColor={colors.mutedForeground}
+                value={groupTitle}
+                onChangeText={setGroupTitle}
+              />
+              <View style={[styles.groupSettingsBox, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                <Text style={[styles.groupSettingsTitle, { color: colors.text }]}>Paramètres du groupe</Text>
+                {(["closed", "invite", "open"] as GroupAccessMode[]).map((mode) => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={styles.groupSettingsRow}
+                    onPress={() => setNewGroupSettings((prev) => ({ ...prev, accessMode: mode }))}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons
+                      name={newGroupSettings.accessMode === mode ? "radio-button-on" : "radio-button-off"}
+                      size={18}
+                      color={newGroupSettings.accessMode === mode ? colors.primary : colors.mutedForeground}
+                    />
+                    <Text style={[styles.groupSettingsText, { color: colors.text }]}>
+                      {groupAccessModeLabel(mode)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[styles.groupSettingsRow, styles.groupSettingsToggle]}
+                  onPress={() =>
+                    setNewGroupSettings((prev) => ({
+                      ...prev,
+                      membersCanSendMedia: !prev.membersCanSendMedia,
+                    }))
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.groupSettingsText, { color: colors.text }]}>
+                    Médias autorisés pour les membres
+                  </Text>
+                  <Ionicons
+                    name={newGroupSettings.membersCanSendMedia ? "toggle" : "toggle-outline"}
+                    size={24}
+                    color={newGroupSettings.membersCanSendMedia ? colors.primary : colors.mutedForeground}
+                  />
+                </TouchableOpacity>
+              </View>
+            </>
           ) : null}
 
           <FlatList
@@ -835,6 +886,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Inter_400Regular",
   },
+  groupSettingsBox: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    padding: 12,
+    gap: 6,
+  },
+  groupSettingsTitle: { fontSize: 14, fontFamily: "Inter_700Bold", marginBottom: 4 },
+  groupSettingsRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+  groupSettingsToggle: { justifyContent: "space-between" },
+  groupSettingsText: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular" },
   contactRow: {
     flexDirection: "row",
     alignItems: "center",

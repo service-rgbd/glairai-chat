@@ -12,13 +12,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { CallSoundController } from "@/components/CallSoundController";
 import { Avatar } from "@/components/Avatar";
+import { CallSoundController } from "@/components/CallSoundController";
 import { LiveKitCallRoom } from "@/components/LiveKitCallRoom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
-import { configureCallAudioMode, resetCallAudioMode, type CallSoundPhase } from "@/lib/call-audio";
+import type { CallSoundPhase } from "@/lib/call-audio";
 import { CALL_RING_TIMEOUT_MS } from "@/lib/call-config";
 import { callNetworkLabel, useCallNetworkStatus } from "@/lib/call-network";
 import { isNativeCallSupported, isExpoGoRuntime } from "@/lib/call-runtime";
@@ -33,6 +33,11 @@ import {
 } from "@/lib/calls";
 import { clearIncomingCallIfMatches } from "@/lib/incoming-call";
 import { assertCanStartCall, setActiveCall } from "@/lib/call-session-client";
+import { endNativeCall } from "@/lib/call-system-ui";
+import {
+  getGroupDisplayColor,
+  getGroupDisplayInitials,
+} from "@/lib/group-utils";
 
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -47,17 +52,19 @@ export default function CallScreen() {
     callId,
     callSessionId,
     incoming,
+    calleeUserIds: calleeUserIdsParam,
   } = useLocalSearchParams<{
     conversationId: string;
     type?: "audio" | "video";
     callId?: string;
     callSessionId?: string;
     incoming?: string;
+    calleeUserIds?: string | string[];
   }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { currentUser, authToken } = useAuth();
-  const { chats, getOtherUser, startOutgoingCall, updateCall } = useChats();
+  const { chats, users, getOtherUser, startOutgoingCall, updateCall } = useChats();
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +88,24 @@ export default function CallScreen() {
     [chats, conversationId],
   );
   const otherUser = chat ? getOtherUser(chat) : undefined;
+  const isGroupCall = chat?.type === "group";
+  const calleeUserIds = useMemo(() => {
+    const raw = Array.isArray(calleeUserIdsParam)
+      ? calleeUserIdsParam.join(",")
+      : calleeUserIdsParam;
+    if (!raw?.trim()) return undefined;
+    return raw.split(",").map((id) => id.trim()).filter(Boolean);
+  }, [calleeUserIdsParam]);
+  const callDisplayName = isGroupCall
+    ? (chat?.name ?? "Groupe")
+    : (otherUser?.name ?? "Appel Gbairai");
+  const callDisplayAvatar = isGroupCall ? (chat?.avatarUrl ?? null) : (otherUser?.avatar ?? null);
+  const callDisplayInitials =
+    isGroupCall && chat
+      ? getGroupDisplayInitials(chat, users, currentUser?.id ?? "")
+      : (otherUser?.initials ?? "??");
+  const callDisplayColor =
+    isGroupCall && chat ? getGroupDisplayColor(chat.id) : (otherUser?.color ?? colors.primary);
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const callType = type === "video" ? "video" : "audio";
   const isIncoming = incoming === "1";
@@ -111,10 +136,13 @@ export default function CallScreen() {
         });
       }
 
-      clearIncomingCallIfMatches(activeCallSessionIdRef.current);
+      const activeCallSessionId = activeCallSessionIdRef.current;
+      if (activeCallSessionId) {
+        endNativeCall(activeCallSessionId);
+      }
+      clearIncomingCallIfMatches(activeCallSessionId);
       setActiveCall(null);
       setSoundPhase("ended");
-      void resetCallAudioMode();
 
       if (options?.suggestVoiceMessage && conversationId) {
         Alert.alert(
@@ -219,10 +247,10 @@ export default function CallScreen() {
         if (!isIncoming) {
           assertCanStartCall(conversationId);
         }
-        await configureCallAudioMode(callType === "video");
         const nextSession = await prepareConversationCall(conversationId, callType, authToken, {
           role: isIncoming ? "callee" : "caller",
           callId: normalizedCallSessionId,
+          calleeUserIds: !isIncoming ? calleeUserIds : undefined,
         });
         if (cancelled) return;
         setSession(nextSession);
@@ -234,7 +262,8 @@ export default function CallScreen() {
         if (isIncoming || nextSession.role === "callee") {
           callAnsweredRef.current = true;
         }
-        clearIncomingCallIfMatches(nextSession.callId);
+        clearIncomingCallIfMatches(nextSession.callId, { skipNativeEnd: true });
+        endNativeCall(nextSession.callId);
         setSoundPhase("ringing");
       } catch (cause) {
         if (cancelled) return;
@@ -256,9 +285,13 @@ export default function CallScreen() {
     void load();
     return () => {
       cancelled = true;
-      void resetCallAudioMode();
     };
-  }, [authToken, callType, conversationId, isIncoming, normalizedCallSessionId]);
+  }, [authToken, calleeUserIds, callType, conversationId, isIncoming, normalizedCallSessionId]);
+
+  useEffect(() => {
+    if (isIncoming || hangupRef.current) return;
+    setSoundPhase((current) => (current === "idle" ? "ringing" : current));
+  }, [isIncoming]);
 
   useEffect(() => {
     if (activeCallIdRef.current) return;
@@ -266,13 +299,28 @@ export default function CallScreen() {
       activeCallIdRef.current = normalizedCallId;
       return;
     }
-    if (!conversationId || !otherUser?.id || isIncoming) return;
+    if (!conversationId || isIncoming) return;
+    const logUserId =
+      otherUser?.id ??
+      calleeUserIds?.[0] ??
+      chat?.participantIds.find((id) => id !== currentUser?.id);
+    if (!logUserId) return;
     activeCallIdRef.current = startOutgoingCall({
-      userId: otherUser.id,
+      userId: logUserId,
       conversationId,
       type: callType,
     });
-  }, [normalizedCallId, callType, conversationId, isIncoming, otherUser?.id, startOutgoingCall]);
+  }, [
+    calleeUserIds,
+    callType,
+    chat?.participantIds,
+    conversationId,
+    currentUser?.id,
+    isIncoming,
+    normalizedCallId,
+    otherUser?.id,
+    startOutgoingCall,
+  ]);
 
   useEffect(() => {
     if (!error || markedFailureRef.current) return;
@@ -326,7 +374,13 @@ export default function CallScreen() {
   }, [conversationId, finishCall, isIncoming]);
 
   useEffect(() => {
-    if (isIncoming || soundPhase !== "ringing" || wasConnectedRef.current || hangupRef.current) {
+    if (
+      isIncoming ||
+      soundPhase !== "ringing" ||
+      wasConnectedRef.current ||
+      callAnsweredRef.current ||
+      hangupRef.current
+    ) {
       return;
     }
 
@@ -338,7 +392,7 @@ export default function CallScreen() {
   }, [hangup, isIncoming, soundPhase]);
 
   const handleLiveKitConnected = useCallback(() => {
-    setSoundPhase((current) => (current === "ringing" ? "idle" : current));
+    // La sonnerie sortante continue jusqu'à ce que le distant décroche (signal answered / remoteJoined).
   }, []);
 
   const handleRemoteJoined = useCallback(() => {
@@ -350,21 +404,19 @@ export default function CallScreen() {
     connectedAtRef.current = Date.now();
     wasConnectedRef.current = true;
     setSoundPhase("connected");
-    const sessionCallId = activeCallSessionIdRef.current;
-    if (sessionCallId) {
-      void import("@/lib/call-system-ui").then(({ reportNativeCallConnected }) => {
-        reportNativeCallConnected(sessionCallId);
-      });
-    }
   }, []);
 
   const handleRemoteLeft = useCallback(() => {
     if (!wasConnectedRef.current || hangupRef.current) return;
     if (remoteLeftTimerRef.current) return;
+    // 30 s de grâce : une coupure réseau transitoire (ping timeout) fait
+    // disparaître le participant distant le temps de sa reconnexion — raccrocher
+    // après 8 s coupait l'appel avant qu'il ne revienne. Une vraie fin d'appel
+    // arrive de toute façon via le signal "ended"/"cancelled".
     remoteLeftTimerRef.current = setTimeout(() => {
       remoteLeftTimerRef.current = null;
       void hangup();
-    }, 8_000);
+    }, 30_000);
   }, [hangup]);
 
   useEffect(() => {
@@ -378,8 +430,9 @@ export default function CallScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <CallSoundController phase={soundPhase} variant={isIncoming ? "incoming" : "outgoing"} />
-
+      {!isIncoming && soundPhase !== "idle" ? (
+        <CallSoundController phase={soundPhase} variant="outgoing" />
+      ) : null}
       <View style={[styles.header, { paddingTop: topPad + 8 }]}>
         <TouchableOpacity
           onPress={() => void hangup()}
@@ -427,10 +480,10 @@ export default function CallScreen() {
           callType={callType}
           callSessionId={session.callId}
           authToken={authToken}
-          otherUserName={otherUser?.name ?? currentUser?.name ?? "Appel"}
-          otherUserAvatar={otherUser?.avatar ?? null}
-          otherUserInitials={otherUser?.initials ?? "??"}
-          otherUserColor={otherUser?.color ?? colors.primary}
+          otherUserName={callDisplayName}
+          otherUserAvatar={callDisplayAvatar}
+          otherUserInitials={callDisplayInitials}
+          otherUserColor={callDisplayColor}
           onConnected={handleLiveKitConnected}
           onRemoteJoined={handleRemoteJoined}
           onRemoteLeft={handleRemoteLeft}
@@ -445,13 +498,13 @@ export default function CallScreen() {
       ) : (
         <View style={styles.center}>
           <Avatar
-            uri={otherUser?.avatar ?? null}
-            initials={otherUser?.initials ?? "??"}
-            color={otherUser?.color ?? colors.primary}
+            uri={callDisplayAvatar}
+            initials={callDisplayInitials}
+            color={callDisplayColor}
             size={112}
           />
           <Text style={[styles.title, { color: colors.text }]}>
-            {otherUser?.name ?? "Appel Gbairai"}
+            {callDisplayName}
           </Text>
           <Text style={[styles.helper, { color: colors.mutedForeground }]}>
             {soundPhase === "ringing"

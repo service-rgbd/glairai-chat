@@ -24,6 +24,10 @@ import {
 
 const TRACK_SOURCES = [LiveKitTrackSource.Camera, LiveKitTrackSource.Microphone] as const;
 
+/** Palette fixe pour l'UI d'appel (fond sombre) — indépendante du thème clair/sombre. */
+const CALL_CONTROL_ACTIVE_BG = "rgba(255,255,255,0.22)";
+const CALL_CONTROL_MUTED_BG = "#EF4444";
+
 type FacingMode = "user" | "environment";
 
 type Props = {
@@ -45,6 +49,30 @@ type Props = {
   onReconnected?: () => void;
   onTokenRefreshed?: (token: string) => void;
 };
+
+/**
+ * Force la catégorie AVAudioSession en "playAndRecord" dès l'entrée en salle.
+ * Ne pas dépendre uniquement de la gestion automatique (events du moteur natif) :
+ * si elle ne se déclenche pas, la session reste en lecture seule → micro muet
+ * et aucun son dans les deux sens.
+ */
+async function configureNativeCallAudio(videoCall: boolean) {
+  try {
+    await AudioSession.setAppleAudioConfiguration({
+      audioCategory: "playAndRecord",
+      audioCategoryOptions: [
+        "allowBluetooth",
+        "allowBluetoothA2DP",
+        "defaultToSpeaker",
+      ],
+      audioMode: videoCall ? "videoChat" : "voiceChat",
+    });
+    await AudioSession.setDefaultRemoteAudioTrackVolume(1);
+    await AudioSession.startAudioSession();
+  } catch {
+    // Best effort.
+  }
+}
 
 async function applySpeakerRoute(enabled: boolean) {
   try {
@@ -90,23 +118,24 @@ function ConnectionWatcher({
   useEffect(() => {
     if (!room) return;
 
-    const handleState = (state: LiveKitConnectionStateValue) => {
+    const handleState = (state: unknown) => {
+      const nextState = state as LiveKitConnectionStateValue;
       const previous = previousStateRef.current;
-      previousStateRef.current = state;
+      previousStateRef.current = nextState;
 
-      if (state === LiveKitConnectionState.Reconnecting) {
+      if (nextState === LiveKitConnectionState.Reconnecting) {
         onReconnecting?.();
       }
 
       if (
         previous === LiveKitConnectionState.Reconnecting &&
-        state === LiveKitConnectionState.Connected
+        nextState === LiveKitConnectionState.Connected
       ) {
         onReconnected?.();
       }
 
       if (
-        state === LiveKitConnectionState.Reconnecting &&
+        nextState === LiveKitConnectionState.Reconnecting &&
         callSessionId &&
         authToken &&
         !refreshInFlightRef.current
@@ -123,8 +152,8 @@ function ConnectionWatcher({
       }
     };
 
-    handleState(room.state as LiveKitConnectionStateValue);
-    room.on("connectionStateChanged", handleState as (state: LiveKitConnectionStateValue) => void);
+    handleState(room.state);
+    room.on("connectionStateChanged", handleState);
     return () => {
       room.off("connectionStateChanged", handleState);
     };
@@ -157,12 +186,24 @@ function CallRoomBody({
   const facingModeRef = useRef<FacingMode>("user");
   const [micEnabled, setMicEnabled] = useState(true);
   const [cameraEnabled, setCameraEnabled] = useState(callType === "video");
-  const [speakerOn, setSpeakerOn] = useState(callType === "video");
+  const [speakerOn, setSpeakerOn] = useState(true);
   const [primaryView, setPrimaryView] = useState<"remote" | "local">("remote");
 
   const tracks = useTracks([...TRACK_SOURCES] as Parameters<typeof useTracks>[0], {
     onlySubscribed: false,
   });
+
+  const hasRemoteMedia = useMemo(
+    () =>
+      tracks.some(
+        (track) =>
+          isTrackReference(track) &&
+          track.participant.identity !== localParticipant.identity &&
+          (track.publication.source === LiveKitTrackSource.Microphone ||
+            track.publication.source === LiveKitTrackSource.Camera),
+      ),
+    [localParticipant.identity, tracks],
+  );
 
   const remoteVideoTrack = useMemo(
     () =>
@@ -191,10 +232,26 @@ function CallRoomBody({
   }, [speakerOn]);
 
   useEffect(() => {
+    for (const track of tracks) {
+      if (!isTrackReference(track) || track.participant.identity === localParticipant.identity) {
+        continue;
+      }
+
+      const publication = track.publication as typeof track.publication & {
+        setSubscribed?: (subscribed: boolean) => void;
+        audioTrack?: { setVolume?: (volume: number) => void };
+      };
+
+      publication.setSubscribed?.(true);
+      publication.audioTrack?.setVolume?.(1);
+    }
+  }, [localParticipant.identity, tracks]);
+
+  useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        await AudioSession.startAudioSession();
+        await configureNativeCallAudio(callType === "video");
         if (!active) return;
         await localParticipant.setMicrophoneEnabled(true);
         if (callType === "video") {
@@ -213,7 +270,7 @@ function CallRoomBody({
   }, [callType]);
 
   useEffect(() => {
-    if (remoteParticipants.length > 0) {
+    if (remoteParticipants.length > 0 || hasRemoteMedia) {
       hadRemoteRef.current = true;
       onRemoteJoined();
       return;
@@ -222,7 +279,7 @@ function CallRoomBody({
     if (hadRemoteRef.current) {
       onRemoteLeft?.();
     }
-  }, [onRemoteJoined, onRemoteLeft, remoteParticipants.length]);
+  }, [hasRemoteMedia, onRemoteJoined, onRemoteLeft, remoteParticipants.length]);
 
   const toggleMic = async () => {
     const next = !micEnabled;
@@ -335,7 +392,10 @@ function CallRoomBody({
 
       <View style={[styles.controls, { bottom: controlsBottom }]}>
         <TouchableOpacity
-          style={[styles.controlBtn, { backgroundColor: micEnabled ? colors.card : colors.destructive }]}
+          style={[
+            styles.controlBtn,
+            { backgroundColor: micEnabled ? CALL_CONTROL_ACTIVE_BG : CALL_CONTROL_MUTED_BG },
+          ]}
           onPress={() => void toggleMic()}
           activeOpacity={0.8}
         >
@@ -345,14 +405,17 @@ function CallRoomBody({
         {callType === "video" ? (
           <>
             <TouchableOpacity
-              style={[styles.controlBtn, { backgroundColor: cameraEnabled ? colors.card : colors.destructive }]}
+              style={[
+                styles.controlBtn,
+                { backgroundColor: cameraEnabled ? CALL_CONTROL_ACTIVE_BG : CALL_CONTROL_MUTED_BG },
+              ]}
               onPress={() => void toggleCamera()}
               activeOpacity={0.8}
             >
               <Ionicons name={cameraEnabled ? "videocam" : "videocam-off"} size={24} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.controlBtn, { backgroundColor: colors.card }]}
+              style={[styles.controlBtn, { backgroundColor: CALL_CONTROL_ACTIVE_BG }]}
               onPress={() => void flipCamera()}
               activeOpacity={0.8}
               accessibilityLabel="Inverser la caméra"
@@ -363,7 +426,10 @@ function CallRoomBody({
         ) : null}
 
         <TouchableOpacity
-          style={[styles.controlBtn, { backgroundColor: speakerOn ? colors.card : colors.destructive }]}
+          style={[
+            styles.controlBtn,
+            { backgroundColor: speakerOn ? CALL_CONTROL_ACTIVE_BG : CALL_CONTROL_MUTED_BG },
+          ]}
           onPress={() => void toggleSpeaker()}
           activeOpacity={0.8}
         >
@@ -397,6 +463,24 @@ export function LiveKitCallRoom({
     setRoomToken(token);
   }, [token]);
 
+  // Identités stables pour les callbacks passés à LiveKitRoom : son effet de
+  // connexion dépend de `onError` — une nouvelle fonction à chaque rendu
+  // relançait room.connect() en boucle (spam « already connected to room »).
+  const onConnectedRef = useRef(onConnected);
+  const onErrorRef = useRef(rest.onError);
+  useEffect(() => {
+    onConnectedRef.current = onConnected;
+    onErrorRef.current = rest.onError;
+  });
+
+  const handleRoomConnected = useCallback(() => onConnectedRef.current(), []);
+  const handleRoomDisconnected = useCallback(() => {
+    // Déconnexion LiveKit != raccrochage volontaire. Les timeouts/pannes réseau
+    // doivent laisser la signalisation d'appel décider, sinon un ping timeout
+    // coupe immédiatement l'appel pour les deux participants.
+  }, []);
+  const handleRoomError = useCallback((error: Error) => onErrorRef.current(error.message), []);
+
   return (
     <LiveKitRoom
       serverUrl={serverUrl}
@@ -404,9 +488,9 @@ export function LiveKitCallRoom({
       connect
       audio
       video={rest.callType === "video"}
-      onConnected={onConnected}
-      onDisconnected={rest.onDisconnected}
-      onError={(error) => rest.onError(error.message)}
+      onConnected={handleRoomConnected}
+      onDisconnected={handleRoomDisconnected}
+      onError={handleRoomError}
     >
       <CallRoomBody
         {...rest}

@@ -22,6 +22,7 @@ import { useColors } from "@/hooks/useColors";
 import { signalConversationCall } from "@/lib/calls";
 import { logConversationCall } from "@/lib/call-log";
 import { subscribeCallSignal } from "@/lib/call-signaling";
+import { endNativeCall } from "@/lib/call-system-ui";
 import {
   clearIncomingCallIfMatches,
   getIncomingCall,
@@ -87,7 +88,8 @@ export function IncomingCallOverlay() {
       failed: false,
       duration: null,
     });
-    clearIncomingCallIfMatches(incoming.callId);
+    clearIncomingCallIfMatches(incoming.callId, { skipNativeEnd: true });
+    endNativeCall(incoming.callId);
     router.push({
       pathname: "/call/[conversationId]",
       params: {

@@ -16,6 +16,7 @@ import { SafeKeyboardAvoidingView as KeyboardAvoidingView } from "@/components/S
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
+import { GroupCallMemberPicker } from "@/components/GroupCallMemberPicker";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatOptionsSheet } from "@/components/ChatOptionsSheet";
 import { ChatWallpaper } from "@/components/ChatWallpaper";
@@ -35,6 +36,7 @@ import {
   getGroupMemberCountLabel,
 } from "@/lib/group-utils";
 import { assertCanStartCall } from "@/lib/call-session-client";
+import { DEFAULT_GROUP_SETTINGS } from "@/lib/group-settings";
 import {
   getDeleteMessageTitle,
   getMessageActionAvailability,
@@ -71,6 +73,7 @@ export default function ChatScreen() {
     unblockUser,
     archiveConversation,
     isUserBlocked,
+    isGroupAdmin,
   } = useChats();
   const listRef = useRef<FlatList<GMessage>>(null);
   const currentUserId = currentUser?.id ?? "me";
@@ -81,6 +84,8 @@ export default function ChatScreen() {
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [showConversationSearch, setShowConversationSearch] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [groupCallPickerOpen, setGroupCallPickerOpen] = useState(false);
+  const [pendingGroupCallType, setPendingGroupCallType] = useState<"audio" | "video">("audio");
 
   const chat = chats.find((c) => c.id === id);
   const chatMessages = messages[id ?? ""] ?? [];
@@ -170,23 +175,56 @@ export default function ChatScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const openCall = (type: "audio" | "video") => {
-    if (!id || !otherUser || isGroup || isBlockedContact) return;
+  const groupMembers = isGroup
+    ? (chat?.participantIds ?? [])
+        .filter((memberId) => memberId !== currentUserId)
+        .map((memberId) => users[memberId])
+        .filter((member): member is NonNullable<typeof member> => Boolean(member))
+    : [];
+  const canSendGroupMedia =
+    !isGroup ||
+    isGroupAdmin(chat!, currentUserId) ||
+    (chat?.groupSettings?.membersCanSendMedia ?? DEFAULT_GROUP_SETTINGS.membersCanSendMedia);
+
+  const launchCall = (type: "audio" | "video", calleeUserIds?: string[]) => {
+    if (!id || isBlockedContact) return;
     try {
       assertCanStartCall(id);
     } catch {
       Alert.alert("Occupé", "Terminez l'appel en cours avant d'en lancer un autre.");
       return;
     }
+    const logUserId = otherUser?.id ?? calleeUserIds?.[0] ?? groupMembers[0]?.id;
+    if (!logUserId) return;
     const callId = startOutgoingCall({
-      userId: otherUser.id,
+      userId: logUserId,
       conversationId: id,
       type,
     });
     router.push({
       pathname: "/call/[conversationId]",
-      params: { conversationId: id, type, callId },
+      params: {
+        conversationId: id,
+        type,
+        callId,
+        ...(calleeUserIds?.length ? { calleeUserIds: calleeUserIds.join(",") } : {}),
+      },
     });
+  };
+
+  const openCall = (type: "audio" | "video") => {
+    if (!id || isBlockedContact) return;
+    if (isGroup) {
+      if (!groupMembers.length) {
+        Alert.alert("Appel impossible", "Aucun autre membre dans ce groupe.");
+        return;
+      }
+      setPendingGroupCallType(type);
+      setGroupCallPickerOpen(true);
+      return;
+    }
+    if (!otherUser) return;
+    launchCall(type);
   };
 
   const handleSelectSearchMessage = (message: GMessage) => {
@@ -532,7 +570,7 @@ export default function ChatScreen() {
         </TouchableOpacity>
 
         <View style={styles.headerRightCluster}>
-          {!isGroup ? (
+          {!isBlockedContact ? (
             <>
               <TouchableOpacity
                 style={[styles.headerCircleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -571,6 +609,7 @@ export default function ChatScreen() {
           {!isBlockedContact ? (
           <ChatInput
             conversationId={id}
+            allowMedia={canSendGroupMedia}
             autoStartVoiceRecording={recordVoice === "1"}
             onSend={handleSend}
             onSendEmoji3d={handleSendEmoji3d}
@@ -631,6 +670,17 @@ export default function ChatScreen() {
         messages={chatMessages}
         onClose={() => setShowConversationSearch(false)}
         onSelectMessage={handleSelectSearchMessage}
+      />
+
+      <GroupCallMemberPicker
+        visible={groupCallPickerOpen}
+        callType={pendingGroupCallType}
+        members={groupMembers}
+        onClose={() => setGroupCallPickerOpen(false)}
+        onConfirm={(selectedUserIds) => {
+          setGroupCallPickerOpen(false);
+          launchCall(pendingGroupCallType, selectedUserIds);
+        }}
       />
 
       <MessageEditModal

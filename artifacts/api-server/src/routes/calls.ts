@@ -36,7 +36,13 @@ router.post("/calls/token", requireAuth, async (req: AuthenticatedRequest, res) 
     const base = CreateCallTokenBody.parse(req.body);
     const role = parseCallRole(req.body?.role);
     const callId = typeof req.body?.callId === "string" ? req.body.callId : undefined;
-    const result = await createCallSession(req.authToken!, { ...base, role, callId });
+    const calleeUserIds = Array.isArray(base.calleeUserIds) ? base.calleeUserIds : undefined;
+    const result = await createCallSession(req.authToken!, {
+      ...base,
+      role,
+      callId,
+      calleeUserIds,
+    });
     res.json(result);
   } catch (error) {
     respondCallError(res, error);

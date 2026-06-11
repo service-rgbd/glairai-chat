@@ -82,8 +82,10 @@ import {
   encodeEditedTextMessageContent,
   getMessageDisplayContent,
 } from "@/lib/message-meta";
+import { parseGroupSettings } from "@/lib/group-settings";
 import { runWithUploadStatus } from "@/lib/upload-status";
 import {
+  E2E_FALLBACK_LABEL,
   ensureE2eDeviceRegistered,
   encryptDirectTextMessage,
   isE2eEnabled,
@@ -326,10 +328,25 @@ function getDirectPeerUserId(
     ?.userId ?? null;
 }
 
+function resolveE2eSessionPeerUserId(
+  conversationId: string,
+  senderId: string,
+  currentUserId: string,
+  conversations: Map<string, ConversationSummary>,
+) {
+  if (senderId !== currentUserId) return senderId;
+  const conversation = conversations.get(conversationId);
+  if (!conversation) return senderId;
+  return getDirectPeerUserId(conversation, currentUserId) ?? senderId;
+}
+
 function toReadableMessageContent(
   message: Pick<ConversationMessage, "content">,
   decryptedContent?: string,
 ) {
+  if (!decryptedContent && isE2ePayload(message.content)) {
+    return E2E_FALLBACK_LABEL;
+  }
   const source = decryptedContent ?? message.content;
   return getMessageDisplayContent(source).displayContent;
 }
@@ -835,6 +852,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           messages: upsertConversationMessage(current?.messages ?? [], sentMessage),
           nextCursor: current?.nextCursor ?? null,
         }));
+        if (isE2ePayload(wireContent)) {
+          setE2eDecryptCache((prev) => ({ ...prev, [sentMessage.id]: queued.content }));
+        }
         setOutbox((prev) => prev.filter((item) => item.localId !== queued.localId));
       }
     } finally {
@@ -1511,6 +1531,12 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             createdBy: conversation.createdBy,
             unreadCount: conversation.unreadCount,
             isArchived: Boolean(extended.isArchived),
+            groupSettings:
+              conversation.type === "group"
+                ? parseGroupSettings(
+                    (conversation as ConversationSummary & { groupSettings?: unknown }).groupSettings,
+                  )
+                : undefined,
             lastMessage:
               conversation.lastMessage && currentUser
                 ? toGMessage(
@@ -1566,7 +1592,12 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isE2eEnabled() || !currentUser?.id) return;
 
-    const pending: Array<{ id: string; content: string; senderId: string }> = [];
+    const pending: Array<{
+      id: string;
+      content: string;
+      senderId: string;
+      conversationId: string;
+    }> = [];
 
     for (const conversation of conversationSummaries) {
       const lastMessage = conversation.lastMessage;
@@ -1577,6 +1608,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         id: lastMessage.id,
         content: lastMessage.content,
         senderId: lastMessage.senderId,
+        conversationId: conversation.id,
       });
     }
 
@@ -1591,6 +1623,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           id: message.id,
           content: message.content,
           senderId: message.senderId,
+          conversationId: message.conversationId,
         });
       }
     }
@@ -1604,9 +1637,15 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) break;
         e2eDecryptInflightRef.current.add(item.id);
         try {
+          const sessionPeerUserId = resolveE2eSessionPeerUserId(
+            item.conversationId,
+            item.senderId,
+            currentUser.id,
+            conversationById,
+          );
           updates[item.id] = await tryDecryptDirectTextMessage(
             currentUser.id,
-            item.senderId,
+            sessionPeerUserId,
             item.content,
           );
         } finally {
@@ -1621,7 +1660,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [conversationSummaries, currentUser?.id, messageQueries]);
+  }, [conversationById, conversationSummaries, currentUser?.id, messageQueries]);
 
   const maybeEncryptTextPayload = useCallback(
     async (chatId: string, content: string, messageType: string) => {
@@ -1666,6 +1705,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           messages: upsertConversationMessage(current?.messages ?? [], sentMessage),
           nextCursor: current?.nextCursor ?? null,
         }));
+        if (isE2ePayload(wireContent)) {
+          setE2eDecryptCache((prev) => ({ ...prev, [sentMessage.id]: content }));
+        }
         setOutbox((prev) => prev.filter((item) => item.localId !== payload.localId));
       } catch {
         setOutbox((prev) =>
@@ -1870,6 +1912,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         messages: upsertConversationMessage(current?.messages ?? [], updatedMessage),
         nextCursor: current?.nextCursor ?? null,
       }));
+      if (isE2ePayload(wireContent)) {
+        setE2eDecryptCache((prev) => ({ ...prev, [updatedMessage.id]: trimmed }));
+      }
       queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
         conversations: updateConversationSummaryWithEditedMessage(
           current?.conversations ?? [],
@@ -2404,12 +2449,14 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const startConversationWithUsers = async (
     userIds: string[],
     title?: string | null,
+    groupSettings?: Partial<import("@/lib/group-settings").GroupSettings>,
   ) => {
     const conversation = await createConversation({
       participantUserIds: userIds,
       participantPhones: [],
       title: title?.trim() ? title.trim() : null,
-    });
+      ...(groupSettings ? { groupSettings } : {}),
+    } as Parameters<typeof createConversation>[0]);
     queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
       conversations: upsertConversationSummary(current?.conversations ?? [], conversation),
     }));
@@ -2426,9 +2473,16 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
   const updateGroup = async (
     conversationId: string,
-    input: { title?: string | null; avatarUrl?: string | null },
+    input: {
+      title?: string | null;
+      avatarUrl?: string | null;
+      groupSettings?: Partial<import("@/lib/group-settings").GroupSettings>;
+    },
   ) => {
-    const conversation = await updateConversation(conversationId, input);
+    const conversation = await updateConversation(
+      conversationId,
+      input as Parameters<typeof updateConversation>[1],
+    );
     await applyConversationUpdate(conversation);
   };
 

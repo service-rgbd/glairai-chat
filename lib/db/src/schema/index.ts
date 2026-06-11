@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -106,6 +107,10 @@ export const conversationsTable = pgTable("conversations", {
     .references(() => usersTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  groupSettings: jsonb("group_settings").$type<{
+    membersCanSendMedia?: boolean;
+    accessMode?: "closed" | "invite" | "open";
+  }>(),
 }, (table) => ({
   createdByIdx: index("conversations_created_by_idx").on(table.createdBy),
   updatedAtIdx: index("conversations_updated_at_idx").on(table.updatedAt),

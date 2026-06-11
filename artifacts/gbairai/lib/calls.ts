@@ -73,8 +73,18 @@ export async function prepareOutgoingCall(
   conversationId: string,
   type: CreateCallTokenInputType,
   authToken: string,
+  options?: { calleeUserIds?: string[] },
 ): Promise<PreparedCallSession> {
-  return postCallApi("/calls/token", { conversationId, type, role: "caller" }, authToken);
+  return postCallApi(
+    "/calls/token",
+    {
+      conversationId,
+      type,
+      role: "caller",
+      ...(options?.calleeUserIds?.length ? { calleeUserIds: options.calleeUserIds } : {}),
+    },
+    authToken,
+  );
 }
 
 export async function prepareIncomingCall(
@@ -120,10 +130,12 @@ export async function prepareConversationCall(
   conversationId: string,
   type: CreateCallTokenInputType,
   authToken: string,
-  options?: { role?: CallRole; callId?: string },
+  options?: { role?: CallRole; callId?: string; calleeUserIds?: string[] },
 ): Promise<PreparedCallSession> {
   if (options?.role === "callee" && options.callId) {
     return prepareIncomingCall(conversationId, type, options.callId, authToken);
   }
-  return prepareOutgoingCall(conversationId, type, authToken);
+  return prepareOutgoingCall(conversationId, type, authToken, {
+    calleeUserIds: options?.calleeUserIds,
+  });
 }
