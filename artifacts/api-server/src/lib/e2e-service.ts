@@ -4,7 +4,7 @@ import {
   e2eOneTimePreKeysTable,
   hasDatabase,
 } from "@workspace/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 
 export type E2eOneTimePreKeyInput = {
@@ -75,6 +75,20 @@ export async function registerE2eDevice(userId: string, input: RegisterE2eDevice
   }
 
   if (hasDatabase && db) {
+    const otherDevices = await db
+      .select({ id: e2eDevicesTable.id })
+      .from(e2eDevicesTable)
+      .where(and(eq(e2eDevicesTable.userId, userId), ne(e2eDevicesTable.deviceId, input.deviceId)));
+
+    for (const other of otherDevices) {
+      await db.delete(e2eOneTimePreKeysTable).where(eq(e2eOneTimePreKeysTable.deviceRowId, other.id));
+    }
+    if (otherDevices.length) {
+      await db
+        .delete(e2eDevicesTable)
+        .where(and(eq(e2eDevicesTable.userId, userId), ne(e2eDevicesTable.deviceId, input.deviceId)));
+    }
+
     const existing = await db
       .select({ id: e2eDevicesTable.id })
       .from(e2eDevicesTable)
@@ -122,6 +136,13 @@ export async function registerE2eDevice(userId: string, input: RegisterE2eDevice
     return { deviceRowId, deviceId: input.deviceId };
   }
 
+  for (const [key, device] of memoryDevices.entries()) {
+    if (device.userId === userId && device.deviceId !== input.deviceId) {
+      memoryDevices.delete(key);
+      memoryOneTimeKeys.delete(device.id);
+    }
+  }
+
   const deviceRowId = randomUUID();
   memoryDevices.set(deviceMemoryKey(userId, input.deviceId), {
     id: deviceRowId,
@@ -153,6 +174,7 @@ export async function getE2ePreKeyBundle(userId: string): Promise<E2ePreKeyBundl
       .select()
       .from(e2eDevicesTable)
       .where(eq(e2eDevicesTable.userId, userId))
+      .orderBy(desc(e2eDevicesTable.updatedAt))
       .limit(1);
 
     if (!device) return null;
