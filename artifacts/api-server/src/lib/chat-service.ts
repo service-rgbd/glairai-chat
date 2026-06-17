@@ -532,8 +532,12 @@ function normalizePhone(phone: string, countryCode?: string) {
   };
 }
 
+function isE2eMessageContent(content: string) {
+  return content.startsWith("e2e:v1:");
+}
+
 function formatPushMessageBody(content: string, type: MessageType): string {
-  if (content.startsWith("e2e:v1:")) {
+  if (isE2eMessageContent(content)) {
     return "Nouveau message";
   }
   if (type === "image") {
@@ -2542,10 +2546,12 @@ class DatabaseChatService implements ChatService {
       throw new Error("Message trop long");
     }
 
-    const editedContent = encodeEditedTextMessageContent(
-      normalizedContent,
-      new Date().toISOString(),
-    );
+    const editedContent = isE2eMessageContent(normalizedContent)
+      ? normalizedContent
+      : encodeEditedTextMessageContent(
+          normalizedContent,
+          new Date().toISOString(),
+        );
 
     await db!
       .update(messagesTable)
