@@ -3170,6 +3170,16 @@ class DatabaseChatService implements ChatService {
         ),
       );
 
+    logger.info(
+      {
+        callId: input.callId,
+        recipientCount: recipientIds.length,
+        deviceCount: devices.length,
+        voipTokenCount: devices.filter((device) => Boolean(device.voipPushToken)).length,
+      },
+      "Préparation push appel entrant",
+    );
+
     const voipSent = await sendVoipIncomingCallPushes(devices, {
       callerName: input.callerName,
       callerAvatarUrl: input.callerAvatarUrl,

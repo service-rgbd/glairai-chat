@@ -1,5 +1,7 @@
 import apn from "apn";
 
+import { logger } from "./logger";
+
 type VoipPushInput = {
   voipPushToken: string;
   callerName: string;
@@ -87,6 +89,10 @@ export function isVoipPushConfigured() {
   return readApnsVoipCredentials() != null;
 }
 
+export function getApnsVoipEnvironment() {
+  return readApnsVoipCredentials()?.production ? "production" : "sandbox";
+}
+
 /** Vérifie que la clé .p8 peut signer un JWT APNS (sans envoyer de push). */
 export async function verifyApnsVoipCredentials() {
   const credentials = readApnsVoipCredentials();
@@ -122,17 +128,36 @@ export async function sendVoipIncomingCallPushes(
   input: VoipPushInput,
 ) {
   const activeProvider = getProvider();
-  if (!activeProvider) return 0;
+  if (!activeProvider) {
+    logger.warn(
+      {
+        callId: input.callId,
+        apnsVoipConfigured: false,
+      },
+      "Push VoIP non envoyé: configuration APNS absente",
+    );
+    return 0;
+  }
 
   const tokens = recipients
     .map((item) => item.voipPushToken)
     .filter((token): token is string => typeof token === "string" && token.length > 8);
 
-  if (!tokens.length) return 0;
+  if (!tokens.length) {
+    logger.warn(
+      {
+        callId: input.callId,
+        recipientCount: recipients.length,
+        voipTokenCount: 0,
+      },
+      "Push VoIP non envoyé: aucun token VoIP enregistré",
+    );
+    return 0;
+  }
 
   const notification = new apn.Notification();
   notification.topic = `${getBundleId()}.voip`;
-  notification.pushType = "voip";
+  (notification as apn.Notification & { pushType: string }).pushType = "voip";
   notification.priority = 10;
   notification.expiry = Math.floor(Date.now() / 1000) + 60;
   notification.payload = {
@@ -154,6 +179,30 @@ export async function sendVoipIncomingCallPushes(
 
   try {
     const result = await activeProvider.send(notification, tokens);
+    if (result.failed.length) {
+      logger.warn(
+        {
+          callId: input.callId,
+          environment: getApnsVoipEnvironment(),
+          sentCount: result.sent.length,
+          failedCount: result.failed.length,
+          failures: result.failed.map((failure) => ({
+            status: failure.status,
+            response: failure.response,
+          })),
+        },
+        "Push VoIP APNS partiellement ou totalement refusé",
+      );
+    } else {
+      logger.info(
+        {
+          callId: input.callId,
+          environment: getApnsVoipEnvironment(),
+          sentCount: result.sent.length,
+        },
+        "Push VoIP APNS envoyé",
+      );
+    }
     return result.sent.length;
   } catch {
     shutdownVoipPushProvider();
