@@ -7,7 +7,7 @@ export interface GroupSettings {
 
 export const DEFAULT_GROUP_SETTINGS: GroupSettings = {
   membersCanSendMedia: true,
-  accessMode: "invite",
+  accessMode: "open",
 };
 
 export function parseGroupSettings(raw: unknown): GroupSettings {

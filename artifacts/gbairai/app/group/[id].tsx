@@ -114,7 +114,7 @@ export default function GroupInfoScreen() {
   }
 
   const groupSettings = chat.groupSettings ?? DEFAULT_GROUP_SETTINGS;
-  const canAddMembers = isAdmin || groupSettings.accessMode === "open";
+  const canAddMembers = groupSettings.accessMode !== "closed" || isAdmin;
   const canShareInvite = isAdmin || groupSettings.accessMode !== "closed";
 
   const saveGroupSettings = async (next: Partial<GroupSettings>) => {
@@ -377,6 +377,18 @@ export default function GroupInfoScreen() {
                   <Text style={[styles.actionLabel, { color: colors.text }]}>Inviter</Text>
                 </TouchableOpacity>
               ) : null}
+
+              <TouchableOpacity
+                style={[styles.actionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => {
+                  if (!id) return;
+                  router.push(`/chat-media/${id}`);
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="images-outline" size={22} color={colors.primary} />
+                <Text style={[styles.actionLabel, { color: colors.text }]}>Médias</Text>
+              </TouchableOpacity>
             </View>
 
             {isAdmin ? (

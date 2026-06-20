@@ -2037,9 +2037,6 @@ class DatabaseChatService implements ChatService {
     if (!isAdmin && groupSettings.accessMode === "closed") {
       throw new Error("Seul l'administrateur peut ajouter des membres dans ce groupe fermé");
     }
-    if (!isAdmin && groupSettings.accessMode === "invite") {
-      throw new Error("Utilisez le lien d'invitation pour rejoindre ce groupe");
-    }
 
     const existingMemberIds = new Set(await this.getConversationParticipantIds(conversationId));
     const newMemberIds = new Set<string>();

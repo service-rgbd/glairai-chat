@@ -19,6 +19,7 @@ import { AuthenticatedIncomingCallOverlay } from "@/components/AuthenticatedInco
 import { AuthenticatedNativeCallController } from "@/components/AuthenticatedNativeCallController";
 import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ChatWallpaperProvider } from "@/contexts/ChatWallpaperContext";
 import { ChatsProvider } from "@/contexts/ChatsContext";
 import { ChannelsProvider } from "@/modules/channels/context/ChannelsContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -46,6 +47,7 @@ function RootStack() {
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="chat/[id]" />
+      <Stack.Screen name="chat-media/[conversationId]" />
       <Stack.Screen name="group/[id]" />
       <Stack.Screen name="group/join" />
       <Stack.Screen name="media-viewer" options={{ presentation: "fullScreenModal" }} />
@@ -91,11 +93,13 @@ export default function RootLayout() {
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
               <PersistedQueryProvider>
-                <ChatsProvider>
-                  <ChannelsProvider>
-                    <RootAppBody />
-                  </ChannelsProvider>
-                </ChatsProvider>
+                <ChatWallpaperProvider>
+                  <ChatsProvider>
+                    <ChannelsProvider>
+                      <RootAppBody />
+                    </ChannelsProvider>
+                  </ChatsProvider>
+                </ChatWallpaperProvider>
               </PersistedQueryProvider>
             </AuthProvider>
           </QueryClientProvider>

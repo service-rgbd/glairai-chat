@@ -16,6 +16,7 @@ import { SafeKeyboardAvoidingView as KeyboardAvoidingView } from "@/components/S
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
+import { AnimatedIncomingMessage } from "@/components/AnimatedIncomingMessage";
 import { GroupCallMemberPicker } from "@/components/GroupCallMemberPicker";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatOptionsSheet } from "@/components/ChatOptionsSheet";
@@ -36,7 +37,6 @@ import {
   getGroupMemberCountLabel,
 } from "@/lib/group-utils";
 import { assertCanStartCall } from "@/lib/call-session-client";
-import { DEFAULT_GROUP_SETTINGS } from "@/lib/group-settings";
 import {
   getDeleteMessageTitle,
   getMessageActionAvailability,
@@ -73,9 +73,12 @@ export default function ChatScreen() {
     unblockUser,
     archiveConversation,
     isUserBlocked,
-    isGroupAdmin,
   } = useChats();
   const listRef = useRef<FlatList<GMessage>>(null);
+  const displayedMessageIdsRef = useRef<Set<string>>(new Set());
+  const chatMessagesInitializedRef = useRef(false);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [incomingAnimatedIds, setIncomingAnimatedIds] = useState<Set<string>>(() => new Set());
   const currentUserId = currentUser?.id ?? "me";
   const [selectedMessage, setSelectedMessage] = useState<GMessage | null>(null);
   const [editingMessage, setEditingMessage] = useState<GMessage | null>(null);
@@ -126,12 +129,48 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!id) return;
-    void loadConversationMessages(id);
+    chatMessagesInitializedRef.current = false;
+    displayedMessageIdsRef.current.clear();
+    setIncomingAnimatedIds(new Set());
+    setHistoryReady(false);
+
+    void loadConversationMessages(id).finally(() => {
+      setHistoryReady(true);
+    });
     joinConversationRealtime(id);
     return () => {
       leaveConversationRealtime(id);
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!historyReady) return;
+
+    const newIncomingMessages = chatMessages.filter(
+      (message) =>
+        message.senderId !== currentUserId && !displayedMessageIdsRef.current.has(message.id),
+    );
+
+    for (const message of chatMessages) {
+      displayedMessageIdsRef.current.add(message.id);
+    }
+
+    if (!chatMessagesInitializedRef.current) {
+      chatMessagesInitializedRef.current = true;
+      return;
+    }
+
+    if (!newIncomingMessages.length) return;
+
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIncomingAnimatedIds((prev) => {
+      const next = new Set(prev);
+      for (const message of newIncomingMessages) {
+        next.add(message.id);
+      }
+      return next;
+    });
+  }, [chatMessages, currentUserId, historyReady]);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -181,10 +220,7 @@ export default function ChatScreen() {
         .map((memberId) => users[memberId])
         .filter((member): member is NonNullable<typeof member> => Boolean(member))
     : [];
-  const canSendGroupMedia =
-    !isGroup ||
-    isGroupAdmin(chat!, currentUserId) ||
-    (chat?.groupSettings?.membersCanSendMedia ?? DEFAULT_GROUP_SETTINGS.membersCanSendMedia);
+  const canSendGroupMedia = !isBlockedContact;
 
   const launchCall = (type: "audio" | "video", calleeUserIds?: string[]) => {
     if (!id || isBlockedContact) return;
@@ -244,6 +280,15 @@ export default function ChatScreen() {
       label: "Rechercher",
       icon: "search-outline" as const,
       onPress: () => setShowConversationSearch(true),
+    },
+    {
+      key: "media",
+      label: "Médias partagés",
+      icon: "images-outline" as const,
+      onPress: () => {
+        if (!id) return;
+        router.push(`/chat-media/${id}`);
+      },
     },
     {
       key: "archive",
@@ -452,25 +497,27 @@ export default function ChatScreen() {
             </View>
           </View>
         ) : null}
-        <MessageBubble
-          message={item}
-          isMe={isMe}
-          showSenderName={isGroup && !isMe}
-          sender={sender}
-          profileUser={profileUser}
-          isLast={isLast}
-          onLongPress={
-            availability.canEdit || availability.canDelete
-              ? () => handleMessageLongPress(item)
-              : undefined
-          }
-        />
+        <AnimatedIncomingMessage animate={!isMe && incomingAnimatedIds.has(item.id)}>
+          <MessageBubble
+            message={item}
+            isMe={isMe}
+            showSenderName={isGroup && !isMe}
+            sender={sender}
+            profileUser={profileUser}
+            isLast={isLast}
+            onLongPress={
+              availability.canEdit || availability.canDelete
+                ? () => handleMessageLongPress(item)
+                : undefined
+            }
+          />
+        </AnimatedIncomingMessage>
       </View>
     );
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <View style={styles.root}>
       <ChatWallpaper wallpaperId={wallpaperId} />
 
       <View style={styles.screenContent}>
@@ -483,7 +530,7 @@ export default function ChatScreen() {
           style={styles.messageListFullBleed}
           contentContainerStyle={[
             styles.messageList,
-            { paddingBottom: topFadeHeight, paddingTop: listBottomPadding },
+            { paddingBottom: topFadeHeight, paddingTop: listBottomPadding, backgroundColor: "transparent" },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardDismissMode="interactive"
@@ -699,7 +746,7 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, overflow: "hidden" },
+  root: { flex: 1, overflow: "hidden", backgroundColor: "transparent" },
   screenContent: {
     flex: 1,
     zIndex: 1,

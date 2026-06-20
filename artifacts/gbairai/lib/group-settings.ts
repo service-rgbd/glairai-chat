@@ -7,7 +7,7 @@ export interface GroupSettings {
 
 export const DEFAULT_GROUP_SETTINGS: GroupSettings = {
   membersCanSendMedia: true,
-  accessMode: "invite",
+  accessMode: "open",
 };
 
 export function parseGroupSettings(raw: unknown): GroupSettings {
@@ -36,6 +36,6 @@ export function groupAccessModeLabel(mode: GroupAccessMode) {
       return "Ouvert — les membres peuvent inviter";
     case "invite":
     default:
-      return "Sur invitation — rejoindre via lien";
+      return "Sur invitation — les membres ajoutent leurs contacts";
   }
 }
