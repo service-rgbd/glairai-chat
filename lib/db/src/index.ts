@@ -30,4 +30,5 @@ export const pool = connectionString
 export const db = pool ? drizzle(pool, { schema }) : null;
 export const hasDatabase = Boolean(pool);
 
+export { runSqlMigrations } from "./migrate";
 export * from "./schema";
