@@ -146,6 +146,8 @@ export const conversationMembersTable = pgTable(
     lastReadMessageId: text("last_read_message_id"),
     unreadCount: integer("unread_count").notNull().default(0),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    mutedAt: timestamp("muted_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.conversationId, table.userId] }),
@@ -562,6 +564,30 @@ export const channelPostViewsTable = pgTable(
   }),
 );
 
+export const channelReportsTable = pgTable(
+  "channel_reports",
+  {
+    id: text("id").primaryKey(),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channelsTable.id, { onDelete: "cascade" }),
+    reporterUserId: text("reporter_user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    channelReporterIdx: uniqueIndex("channel_reports_channel_reporter_idx").on(
+      table.channelId,
+      table.reporterUserId,
+    ),
+    channelIdx: index("channel_reports_channel_idx").on(table.channelId),
+    reporterIdx: index("channel_reports_reporter_idx").on(table.reporterUserId),
+    createdAtIdx: index("channel_reports_created_at_idx").on(table.createdAt),
+  }),
+);
+
 export const channelRelations = relations(channelsTable, ({ many, one }) => ({
   owner: one(usersTable, {
     fields: [channelsTable.ownerId],
@@ -570,7 +596,9 @@ export const channelRelations = relations(channelsTable, ({ many, one }) => ({
   admins: many(channelAdminsTable),
   followers: many(channelFollowersTable),
   posts: many(channelPostsTable),
+  reports: many(channelReportsTable),
 }));
 
 export type ChannelRecord = typeof channelsTable.$inferSelect;
 export type ChannelPostRecord = typeof channelPostsTable.$inferSelect;
+export type ChannelReportRecord = typeof channelReportsTable.$inferSelect;

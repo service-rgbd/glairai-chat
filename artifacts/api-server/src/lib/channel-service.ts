@@ -16,6 +16,7 @@ import {
   channelPostViewsTable,
   channelPostsTable,
   channelReactionsTable,
+  channelReportsTable,
   channelsTable,
   db,
   hasDatabase,
@@ -642,11 +643,20 @@ class ChannelService {
       .limit(1);
     if (!post) throw new Error("Publication introuvable");
 
-    const channel = await this.requireChannel(post.channelId);
-    if (!channel.isPublic) {
-      const role = await this.resolveRole(post.channelId, userId);
-      if (role === "visitor") throw new Error("Publication introuvable");
+    const role = await this.resolveRole(post.channelId, userId);
+    if (role === "visitor") {
+      throw new Error("Suivez cette chaîne pour réagir à ses publications");
     }
+    const participantIds = await this.getFollowerIds(post.channelId);
+    const publishReactionUpdate = (reactionsCount: number) => {
+      publishChannelEvent({
+        type: "channel.post.reacted",
+        channelId: post.channelId,
+        postId,
+        reactionsCount,
+        participantIds,
+      });
+    };
 
     const [existing] = await database
       .select()
@@ -663,13 +673,16 @@ class ChannelService {
           .update(channelPostsTable)
           .set({ reactionsCount: sql`GREATEST(${channelPostsTable.reactionsCount} - 1, 0)` })
           .where(eq(channelPostsTable.id, postId));
-        return { reaction: null, reactionsCount: Math.max(post.reactionsCount - 1, 0) };
+        const reactionsCount = Math.max(post.reactionsCount - 1, 0);
+        publishReactionUpdate(reactionsCount);
+        return { reaction: null, reactionsCount };
       }
 
       await database
         .update(channelReactionsTable)
         .set({ emoji: normalizedEmoji })
         .where(eq(channelReactionsTable.id, existing.id));
+      publishReactionUpdate(post.reactionsCount);
       return { reaction: normalizedEmoji, reactionsCount: post.reactionsCount };
     }
 
@@ -684,7 +697,35 @@ class ChannelService {
       .set({ reactionsCount: sql`${channelPostsTable.reactionsCount} + 1` })
       .where(eq(channelPostsTable.id, postId));
 
-    return { reaction: normalizedEmoji, reactionsCount: post.reactionsCount + 1 };
+    const reactionsCount = post.reactionsCount + 1;
+    publishReactionUpdate(reactionsCount);
+    return { reaction: normalizedEmoji, reactionsCount };
+  }
+
+  async reportChannel(token: string, channelId: string, reason?: string) {
+    const userId = await this.requireUserId(token);
+    const database = this.ensureDb();
+    const channel = await this.requireChannel(channelId);
+    const normalizedReason = reason?.trim().slice(0, 500) ?? "";
+
+    if (channel.ownerId === userId) {
+      throw new Error("Vous ne pouvez pas signaler votre propre chaîne");
+    }
+
+    await database
+      .insert(channelReportsTable)
+      .values({
+        id: randomId("chrp"),
+        channelId,
+        reporterUserId: userId,
+        reason: normalizedReason,
+      })
+      .onConflictDoUpdate({
+        target: [channelReportsTable.channelId, channelReportsTable.reporterUserId],
+        set: { reason: normalizedReason, createdAt: new Date() },
+      });
+
+    return { success: true };
   }
 
   async recordView(token: string, postId: string) {

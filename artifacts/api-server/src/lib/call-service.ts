@@ -22,7 +22,9 @@ import {
   hydrateCallSession,
   isUserBusy,
   markCallAnswered,
+  markParticipantLeft,
   releaseLiveSessionsForNewCall,
+  remainingCalleeIds,
   resolveCallSession,
   scheduleRingTimeout,
 } from "./call-session-store";
@@ -287,7 +289,7 @@ export async function signalCall(
   authToken: string,
   input: {
     callId: string;
-    action: "cancel" | "decline" | "end";
+    action: "cancel" | "decline" | "end" | "leave";
     conversationId?: string;
     callType?: CallType;
     callerUserId?: string;
@@ -301,6 +303,8 @@ export async function signalCall(
     throw new CallNotFoundError();
   }
 
+  const conversation = await chatService.getConversation(authToken, session.conversationId);
+  const isGroupCall = conversation.type === "group";
   const isCaller = currentUser.id === session.callerUserId;
   const isCallee = session.calleeUserIds.includes(currentUser.id);
   if (!isCaller && !isCallee) {
@@ -315,6 +319,20 @@ export async function signalCall(
     finalizeCall(session.id, "ended");
     return { ok: true as const, status: "ended" as const };
   };
+
+  if (input.action === "leave") {
+    if (!isGroupCall) {
+      throw new CallForbiddenError("Action invalide pour cet appel");
+    }
+    if (isCaller) {
+      throw new CallForbiddenError("Seul l'appelant peut terminer l'appel pour le groupe");
+    }
+    if (session.status !== "answered") {
+      throw new CallForbiddenError("Impossible de quitter cet appel");
+    }
+    markParticipantLeft(session.id, currentUser.id);
+    return { ok: true as const, status: "active" as const };
+  }
 
   if (input.action === "cancel") {
     if (!isCaller) throw new CallForbiddenError("Seul l'appelant peut annuler l'appel");
@@ -334,14 +352,31 @@ export async function signalCall(
   if (input.action === "decline") {
     if (!isCallee) throw new CallForbiddenError("Seul l'appelé peut refuser l'appel");
     if (session.status === "answered") {
+      if (isGroupCall) {
+        markParticipantLeft(session.id, currentUser.id);
+        return { ok: true as const, status: "active" as const };
+      }
       return endAnsweredSession();
     }
     if (session.status !== "ringing") {
       return { ok: true as const, status: session.status };
     }
+    if (isGroupCall) {
+      markParticipantLeft(session.id, currentUser.id);
+      if (remainingCalleeIds(session).length === 0) {
+        await chatService.publishCallDeclined(authToken, session);
+        finalizeCall(session.id, "declined");
+        return { ok: true as const, status: "declined" as const };
+      }
+      return { ok: true as const, status: session.status };
+    }
     await chatService.publishCallDeclined(authToken, session);
     finalizeCall(session.id, "declined");
     return { ok: true as const, status: "declined" as const };
+  }
+
+  if (isGroupCall && !isCaller) {
+    throw new CallForbiddenError("Seul l'appelant peut terminer l'appel de groupe");
   }
 
   if (session.status !== "ringing" && session.status !== "answered") {

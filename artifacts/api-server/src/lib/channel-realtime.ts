@@ -14,6 +14,13 @@ export type ChannelRealtimeEvent =
       postId: string;
     }
   | {
+      type: "channel.post.reacted";
+      participantIds: string[];
+      channelId: string;
+      postId: string;
+      reactionsCount: number;
+    }
+  | {
       type: "channel.updated";
       participantIds: string[];
       channelId: string;
@@ -48,7 +55,7 @@ export function wireChannelEventPublisher(io: Server) {
     for (const userId of event.participantIds) {
       io.to(`user:${userId}`).emit(event.type, event);
     }
-    if (event.type === "channel.post.created") {
+    if (event.type === "channel.post.created" || event.type === "channel.post.reacted") {
       io.to(`channel:${event.channelId}`).emit(event.type, event);
     }
   });

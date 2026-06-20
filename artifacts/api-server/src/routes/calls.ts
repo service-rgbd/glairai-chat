@@ -73,7 +73,7 @@ router.post("/calls/signal", requireAuth, async (req: AuthenticatedRequest, res)
       typeof req.body?.callerUserId === "string" ? req.body.callerUserId : undefined;
     const durationSeconds =
       typeof req.body?.durationSeconds === "number" ? req.body.durationSeconds : undefined;
-    if (!callId || (action !== "cancel" && action !== "decline" && action !== "end")) {
+    if (!callId || (action !== "cancel" && action !== "decline" && action !== "end" && action !== "leave")) {
       throw new Error("Requête d'appel invalide");
     }
     const result = await signalCall(req.authToken!, {

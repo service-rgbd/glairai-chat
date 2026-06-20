@@ -144,6 +144,21 @@ router.delete("/channels/:id/follow", requireAuth, async (req: AuthenticatedRequ
   }
 });
 
+router.post("/channels/:id/report", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const result = await channelService.reportChannel(
+      req.authToken!,
+      getSingleParam(req.params.id),
+      typeof req.body?.reason === "string" ? req.body.reason : undefined,
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Impossible de signaler la chaîne",
+    });
+  }
+});
+
 router.post("/channels/:id/posts", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const mediaType =

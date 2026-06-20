@@ -25,7 +25,7 @@ import {
   userBlocksTable,
   usersTable,
 } from "@workspace/db";
-import { and, desc, eq, gte, inArray, like, lte, ne, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, like, lte, ne, or } from "drizzle-orm";
 import { getCountries, getCountryCallingCode, parsePhoneNumberFromString } from "libphonenumber-js";
 
 import {
@@ -113,6 +113,8 @@ export interface ConversationSummary {
   participants: ConversationParticipant[];
   unreadCount: number;
   isArchived?: boolean;
+  isMuted?: boolean;
+  groupSettings?: GroupSettings;
   lastMessage?: ConversationMessage;
   lastReadMessageId: string | null;
 }
@@ -294,6 +296,15 @@ export interface ChatService {
     conversationId: string,
     archived: boolean,
   ): Awaitable<ConversationSummary>;
+  setConversationMuted(
+    token: string,
+    conversationId: string,
+    muted: boolean,
+  ): Awaitable<ConversationSummary>;
+  deleteConversationForUser(
+    token: string,
+    conversationId: string,
+  ): Awaitable<{ success: boolean }>;
   createStory(
     token: string,
     input: { type: StoryType; content: string; backgroundColor?: string },
@@ -424,6 +435,7 @@ interface DeviceRecord {
   voipPushToken?: string | null;
   platform: string;
   deviceName: string;
+  muted?: boolean;
 }
 
 const USER_COLORS = [
@@ -558,21 +570,19 @@ async function sendExpoPushMessages(
   message: string,
   options?: { conversationId?: string; messageType?: MessageType },
 ) {
-  const validTokens = devices
-    .map((device) => device.pushToken)
-    .filter((token) => token.startsWith("ExponentPushToken["));
+  const validDevices = devices.filter((device) => device.pushToken.startsWith("ExponentPushToken["));
 
-  if (!validTokens.length) return;
+  if (!validDevices.length) return;
 
   const body = options?.messageType
     ? formatPushMessageBody(message, options.messageType)
     : message.slice(0, 160);
 
-  const payload = validTokens.map((to) => ({
-    to,
+  const payload = validDevices.map((device) => ({
+    to: device.pushToken,
     title: senderName,
     body,
-    sound: "default",
+    ...(device.muted ? {} : { sound: "default" }),
     priority: "high" as const,
     channelId: "messages",
     ...(options?.conversationId
@@ -596,7 +606,7 @@ async function sendExpoPushMessages(
     });
     if (!response.ok) {
       logger.warn(
-        { status: response.status, recipientCount: validTokens.length },
+        { status: response.status, recipientCount: validDevices.length },
         "Expo push send failed",
       );
     }
@@ -1835,7 +1845,12 @@ class DatabaseChatService implements ChatService {
     const memberships = await db!
       .select()
       .from(conversationMembersTable)
-      .where(eq(conversationMembersTable.userId, user.id));
+      .where(
+        and(
+          eq(conversationMembersTable.userId, user.id),
+          isNull(conversationMembersTable.deletedAt),
+        ),
+      );
 
     const conversations = await Promise.all(
       memberships.map((membership) => this.toConversationSummary(membership.conversationId, user.id)),
@@ -2418,6 +2433,7 @@ class DatabaseChatService implements ChatService {
                   membership.userId === sender.id
                     ? membership.unreadCount
                     : membership.unreadCount + 1,
+                deletedAt: null,
               })
               .where(
                 and(
@@ -2436,9 +2452,17 @@ class DatabaseChatService implements ChatService {
           pushToken: deviceTokensTable.pushToken,
           platform: deviceTokensTable.platform,
           deviceName: deviceTokensTable.deviceName,
+          mutedAt: conversationMembersTable.mutedAt,
         })
         .from(deviceTokensTable)
         .innerJoin(usersTable, eq(usersTable.id, deviceTokensTable.userId))
+        .innerJoin(
+          conversationMembersTable,
+          and(
+            eq(conversationMembersTable.userId, deviceTokensTable.userId),
+            eq(conversationMembersTable.conversationId, conversationId),
+          ),
+        )
         .where(
           and(
             inArray(deviceTokensTable.userId, participantIds.filter((id) => id !== sender.id)),
@@ -2447,7 +2471,7 @@ class DatabaseChatService implements ChatService {
         );
 
       await sendExpoPushMessages(
-        pushRecipients,
+        pushRecipients.map((recipient) => ({ ...recipient, muted: Boolean(recipient.mutedAt) })),
         sender.name || "Gbairai",
         normalizedContent,
         { conversationId, messageType: input.type },
@@ -3717,6 +3741,7 @@ class DatabaseChatService implements ChatService {
       participants,
       unreadCount: membership.unreadCount,
       isArchived: Boolean(membership.archivedAt),
+      isMuted: Boolean(membership.mutedAt),
       groupSettings:
         conversation.type === "group"
           ? parseGroupSettings(conversation.groupSettings)
@@ -3894,6 +3919,43 @@ class DatabaseChatService implements ChatService {
       );
 
     return this.toConversationSummary(conversationId, user.id);
+  }
+
+  async setConversationMuted(token: string, conversationId: string, muted: boolean) {
+    const user = await this.requireUserByToken(token);
+    await this.requireConversationMembership(conversationId, user.id);
+
+    await db!
+      .update(conversationMembersTable)
+      .set({ mutedAt: muted ? new Date() : null })
+      .where(
+        and(
+          eq(conversationMembersTable.conversationId, conversationId),
+          eq(conversationMembersTable.userId, user.id),
+        ),
+      );
+
+    return this.toConversationSummary(conversationId, user.id);
+  }
+
+  async deleteConversationForUser(token: string, conversationId: string) {
+    const user = await this.requireUserByToken(token);
+    await this.requireConversationMembership(conversationId, user.id);
+
+    await db!
+      .update(conversationMembersTable)
+      .set({
+        deletedAt: new Date(),
+        unreadCount: 0,
+      })
+      .where(
+        and(
+          eq(conversationMembersTable.conversationId, conversationId),
+          eq(conversationMembersTable.userId, user.id),
+        ),
+      );
+
+    return { success: true };
   }
 
   private async ensureContactFromStoryReply(ownerUserId: string, viewerUserId: string) {

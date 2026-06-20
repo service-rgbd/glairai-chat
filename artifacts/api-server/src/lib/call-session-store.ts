@@ -18,6 +18,8 @@ export type ActiveCallSession = {
   callerName: string;
   callerAvatarUrl: string | null;
   calleeUserIds: string[];
+  /** Participants ayant quitté ou refusé — l'appel de groupe continue pour les autres. */
+  leftUserIds: string[];
   status: CallSessionStatus;
   createdAt: number;
   answeredAt: number | null;
@@ -76,14 +78,19 @@ export async function resolveCallSession(callId: string) {
   return persisted;
 }
 
+function isActiveCallParticipant(session: ActiveCallSession, userId: string) {
+  if (session.leftUserIds.includes(userId)) return false;
+  if (session.callerUserId === userId) return true;
+  return session.calleeUserIds.includes(userId);
+}
+
 export function isUserBusy(userId: string, ignoreCallId?: string) {
   purgeStaleSessions();
   for (const session of sessions.values()) {
     if (ignoreCallId && session.id === ignoreCallId) continue;
     if (!LIVE_SESSION_STATUSES.has(session.status)) continue;
     if (isSessionStale(session)) continue;
-    if (session.callerUserId === userId) return true;
-    if (session.calleeUserIds.includes(userId)) return true;
+    if (isActiveCallParticipant(session, userId)) return true;
   }
   return false;
 }
@@ -114,6 +121,7 @@ export function findRingingCallForCallee(userId: string) {
   let latest: ActiveCallSession | null = null;
   for (const session of sessions.values()) {
     if (session.status !== "ringing" || !session.calleeUserIds.includes(userId)) continue;
+    if (session.leftUserIds.includes(userId)) continue;
     if (!latest || session.createdAt > latest.createdAt) {
       latest = session;
     }
@@ -177,6 +185,7 @@ export function createCallSession(input: {
     callerName: input.callerName,
     callerAvatarUrl: input.callerAvatarUrl ?? null,
     calleeUserIds: input.calleeUserIds,
+    leftUserIds: [],
     status: "ringing",
     createdAt: Date.now(),
     answeredAt: null,
@@ -197,6 +206,20 @@ export function markCallAnswered(callId: string) {
   clearRingTimeout(callId);
   syncPersist(session);
   return session;
+}
+
+export function markParticipantLeft(callId: string, userId: string) {
+  const session = sessions.get(callId);
+  if (!session) return null;
+  if (!session.leftUserIds.includes(userId)) {
+    session.leftUserIds.push(userId);
+    syncPersist(session);
+  }
+  return session;
+}
+
+export function remainingCalleeIds(session: ActiveCallSession) {
+  return session.calleeUserIds.filter((id) => !session.leftUserIds.includes(id));
 }
 
 export function finalizeCall(callId: string, status: Exclude<CallSessionStatus, "ringing" | "answered">) {

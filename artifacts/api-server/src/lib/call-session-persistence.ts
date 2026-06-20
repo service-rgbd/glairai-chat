@@ -33,6 +33,7 @@ function rowToSession(row: typeof callSessionsTable.$inferSelect): ActiveCallSes
     callerName: row.callerName,
     callerAvatarUrl: row.callerAvatarUrl,
     calleeUserIds,
+    leftUserIds: [],
     status: row.status,
     createdAt: row.createdAt.getTime(),
     answeredAt: row.answeredAt?.getTime() ?? null,

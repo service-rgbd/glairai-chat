@@ -397,4 +397,48 @@ router.patch(
   },
 );
 
+router.patch(
+  "/conversations/:conversationId/mute",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const muted = req.body?.muted === true;
+      const result = await chatService.setConversationMuted(
+        req.authToken!,
+        getSingleParam(req.params["conversationId"]),
+        muted,
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible de mettre à jour le mode silencieux",
+      });
+    }
+  },
+);
+
+router.delete(
+  "/conversations/:conversationId",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const result = await chatService.deleteConversationForUser(
+        req.authToken!,
+        getSingleParam(req.params["conversationId"]),
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Impossible de supprimer la conversation",
+      });
+    }
+  },
+);
+
 export default router;
