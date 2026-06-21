@@ -133,6 +133,29 @@ export const groupInvitesTable = pgTable("group_invites", {
   expiresAtIdx: index("group_invites_expires_at_idx").on(table.expiresAt),
 }));
 
+export const conversationMemberInvitesTable = pgTable(
+  "conversation_member_invites",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversationsTable.id, { onDelete: "cascade" }),
+    invitedUserId: text("invited_user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    invitedByUserId: text("invited_by_user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+  },
+  (table) => ({
+    invitedUserIdx: index("conversation_member_invites_invited_user_idx").on(table.invitedUserId),
+    conversationIdx: index("conversation_member_invites_conversation_idx").on(table.conversationId),
+  }),
+);
+
 export const conversationMembersTable = pgTable(
   "conversation_members",
   {

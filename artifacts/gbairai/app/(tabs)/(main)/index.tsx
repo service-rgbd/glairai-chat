@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "@/components/Avatar";
 import { ChatItem } from "@/components/ChatItem";
 import { ChatOptionsSheet } from "@/components/ChatOptionsSheet";
+import { GroupInviteBanner } from "@/components/GroupInviteBanner";
 import { PasswordPromptModal } from "@/components/PasswordPromptModal";
 import { SearchBar } from "@/components/SearchBar";
 import { StoryRing } from "@/components/StoryRing";
@@ -66,9 +67,16 @@ export default function ChatsScreen() {
     typingByConversation,
     isUserBlocked,
     archiveConversation,
+    muteConversation,
+    deleteConversation,
+    pendingGroupInvites,
+    acceptGroupMemberInvite,
+    declineGroupMemberInvite,
+    groupInviteActionId,
   } = useChats();
   const [search, setSearch] = useState("");
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [selectedChatForActions, setSelectedChatForActions] = useState<GChat | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showArchivedPassword, setShowArchivedPassword] = useState(false);
   const [archivedAccessEnabled, setArchivedAccessEnabled] = useState(false);
@@ -85,6 +93,8 @@ export default function ChatsScreen() {
   const [newGroupSettings, setNewGroupSettings] = useState<GroupSettings>(DEFAULT_GROUP_SETTINGS);
   const [composerContacts, setComposerContacts] = useState<ComposeContactOption[]>([]);
   const [composerLoading, setComposerLoading] = useState(false);
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false);
+  const lastGroupCreateAtRef = useRef(0);
   const getComposeContactsRef = useRef(getComposeContacts);
   getComposeContactsRef.current = getComposeContacts;
   const { focusSearch } = useLocalSearchParams<{ focusSearch?: string }>();
@@ -257,18 +267,51 @@ export default function ChatsScreen() {
     openArchivedAccess();
   };
 
-  const handleUnarchiveChat = (item: GChat) => {
-    const other = getOtherUser(item);
-    const label = item.type === "group" ? (item.name ?? "Groupe") : (other?.name ?? "Conversation");
-    Alert.alert(label, undefined, [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Désarchiver",
-        onPress: () => {
-          void archiveConversation(item.id, false);
+  const getChatActionLabel = (chat: GChat | null) => {
+    if (!chat) return "Conversation";
+    if (chat.type === "group") return chat.name ?? "Groupe";
+    return getOtherUser(chat)?.name ?? "Conversation";
+  };
+
+  const handleArchiveChat = (chat: GChat) => {
+    void archiveConversation(chat.id, !chat.isArchived).catch((error) => {
+      Alert.alert(
+        "Action impossible",
+        error instanceof Error ? error.message : "Impossible de mettre à jour l'archivage.",
+      );
+    });
+  };
+
+  const handleMuteChat = (chat: GChat) => {
+    void muteConversation(chat.id, !chat.isMuted).catch((error) => {
+      Alert.alert(
+        "Action impossible",
+        error instanceof Error ? error.message : "Impossible de mettre à jour le mode silencieux.",
+      );
+    });
+  };
+
+  const handleDeleteChat = (chat: GChat) => {
+    const label = getChatActionLabel(chat);
+    Alert.alert(
+      "Supprimer la conversation ?",
+      `La conversation avec ${label} sera retirée de votre liste. Elle pourra réapparaître si un nouveau message arrive.`,
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: () => {
+            void deleteConversation(chat.id).catch((error) => {
+              Alert.alert(
+                "Suppression impossible",
+                error instanceof Error ? error.message : "Impossible de supprimer cette conversation.",
+              );
+            });
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   const renderArchivedChatItem = (item: GChat) => {
@@ -283,7 +326,7 @@ export default function ChatsScreen() {
         currentUserId={currentUserId}
         users={users}
         onPress={() => router.push(`/chat/${item.id}`)}
-        onLongPress={() => handleUnarchiveChat(item)}
+        onLongPress={() => setSelectedChatForActions(item)}
       />
     );
   };
@@ -441,22 +484,56 @@ export default function ChatsScreen() {
   };
 
   const handleCreateConversation = async () => {
-    if (selectedUserIds.length === 0) return;
-    const conversationId =
-      selectedUserIds.length === 1
-        ? await startConversationWithUser(selectedUserIds[0]!)
-        : await startConversationWithUsers(
+    if (selectedUserIds.length === 0 || isCreatingConversation) return;
+
+    const isGroup = selectedUserIds.length > 1;
+    if (isGroup) {
+      const elapsed = Date.now() - lastGroupCreateAtRef.current;
+      if (elapsed < 60_000) {
+        Alert.alert(
+          "Patientez",
+          "Vous pouvez créer un nouveau groupe dans une minute pour éviter les doublons.",
+        );
+        return;
+      }
+    }
+
+    setIsCreatingConversation(true);
+    try {
+      const conversationId = isGroup
+        ? await startConversationWithUsers(
             selectedUserIds,
             groupTitle.trim() || "Nouveau groupe",
             newGroupSettings,
-          );
+          )
+        : await startConversationWithUser(selectedUserIds[0]!);
 
-    setComposerOpen(false);
-    setComposerSearch("");
-    setSelectedUserIds([]);
-    setGroupTitle("");
-    setNewGroupSettings(DEFAULT_GROUP_SETTINGS);
-    router.push(`/chat/${conversationId}`);
+      if (isGroup) {
+        lastGroupCreateAtRef.current = Date.now();
+      }
+
+      setComposerOpen(false);
+      setComposerSearch("");
+      setSelectedUserIds([]);
+      setGroupTitle("");
+      setNewGroupSettings(DEFAULT_GROUP_SETTINGS);
+
+      if (isGroup) {
+        Alert.alert(
+          "Groupe créé",
+          "Les invitations ont été envoyées. Les membres doivent accepter pour rejoindre.",
+        );
+      }
+
+      router.push(`/chat/${conversationId}`);
+    } catch (error) {
+      Alert.alert(
+        isGroup ? "Création impossible" : "Discussion impossible",
+        error instanceof Error ? error.message : "Une erreur est survenue.",
+      );
+    } finally {
+      setIsCreatingConversation(false);
+    }
   };
 
   const handleInviteContact = async (item: ComposeContactOption) => {
@@ -513,6 +590,31 @@ export default function ChatsScreen() {
 
       {renderArchivedSection()}
 
+      <GroupInviteBanner
+        invites={pendingGroupInvites}
+        busyInviteId={groupInviteActionId}
+        onAccept={(invite) => {
+          void acceptGroupMemberInvite(invite.id)
+            .then((conversationId) => {
+              router.push(`/chat/${conversationId}`);
+            })
+            .catch((error) => {
+              Alert.alert(
+                "Invitation impossible",
+                error instanceof Error ? error.message : "Impossible d'accepter cette invitation.",
+              );
+            });
+        }}
+        onDecline={(invite) => {
+          void declineGroupMemberInvite(invite.id).catch((error) => {
+            Alert.alert(
+              "Action impossible",
+              error instanceof Error ? error.message : "Impossible de refuser cette invitation.",
+            );
+          });
+        }}
+      />
+
       <FlatList
         data={filtered}
         keyExtractor={(c) => c.id}
@@ -560,6 +662,7 @@ export default function ChatsScreen() {
                   : undefined
               }
               onPress={() => router.push(`/chat/${item.id}`)}
+              onLongPress={() => setSelectedChatForActions(item)}
             />
           );
         }}
@@ -587,6 +690,40 @@ export default function ChatsScreen() {
             onPress: () => openGlobalSearch(),
           },
         ]}
+      />
+
+      <ChatOptionsSheet
+        visible={Boolean(selectedChatForActions)}
+        onClose={() => setSelectedChatForActions(null)}
+        title={getChatActionLabel(selectedChatForActions)}
+        subtitle="Actions sur cette conversation"
+        options={
+          selectedChatForActions
+            ? [
+                {
+                  key: "archive",
+                  label: selectedChatForActions.isArchived ? "Désarchiver" : "Archiver",
+                  icon: selectedChatForActions.isArchived ? "archive" : "archive-outline",
+                  onPress: () => handleArchiveChat(selectedChatForActions),
+                },
+                {
+                  key: "mute",
+                  label: selectedChatForActions.isMuted ? "Réactiver le son" : "Mode silencieux",
+                  icon: selectedChatForActions.isMuted
+                    ? "notifications-outline"
+                    : "notifications-off-outline",
+                  onPress: () => handleMuteChat(selectedChatForActions),
+                },
+                {
+                  key: "delete",
+                  label: "Supprimer la conversation",
+                  icon: "trash-outline",
+                  destructive: true,
+                  onPress: () => handleDeleteChat(selectedChatForActions),
+                },
+              ]
+            : []
+        }
       />
 
       <PasswordPromptModal
@@ -776,14 +913,31 @@ export default function ChatsScreen() {
           />
 
           <TouchableOpacity
-            style={[styles.createBtn, { backgroundColor: selectedUserIds.length ? colors.primary : colors.muted }]}
-            onPress={handleCreateConversation}
-            disabled={!selectedUserIds.length}
+            style={[
+              styles.createBtn,
+              {
+                backgroundColor:
+                  selectedUserIds.length && !isCreatingConversation ? colors.primary : colors.muted,
+              },
+            ]}
+            onPress={() => {
+              void handleCreateConversation();
+            }}
+            disabled={!selectedUserIds.length || isCreatingConversation}
             activeOpacity={0.85}
           >
-            <Text style={[styles.createBtnText, { color: selectedUserIds.length ? "#fff" : colors.mutedForeground }]}>
-              {selectedUserIds.length > 1 ? "Créer le groupe" : "Démarrer la discussion"}
-            </Text>
+            {isCreatingConversation ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text
+                style={[
+                  styles.createBtnText,
+                  { color: selectedUserIds.length ? "#fff" : colors.mutedForeground },
+                ]}
+              >
+                {selectedUserIds.length > 1 ? "Créer le groupe" : "Démarrer la discussion"}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       </Modal>

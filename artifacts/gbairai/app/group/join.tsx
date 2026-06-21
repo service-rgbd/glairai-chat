@@ -16,7 +16,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "@/components/Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChats } from "@/contexts/chats-context-ref";
-import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { useColors } from "@/hooks/useColors";
 import {
   getGroupDisplayColor,
@@ -48,7 +47,6 @@ export default function JoinGroupScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
-  const avatarUri = useCachedMediaUrl(preview?.avatarUrl ?? null);
 
   useEffect(() => {
     if (!isAuthenticated || !activeToken) {
@@ -167,7 +165,7 @@ export default function JoinGroupScreen() {
         {preview ? (
           <View style={[styles.previewCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Avatar
-              uri={avatarUri}
+              uri={preview.avatarUrl}
               initials={previewInitials}
               color={previewColor}
               size={84}

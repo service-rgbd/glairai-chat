@@ -1,5 +1,6 @@
 import type { ContactMatch, GroupInvite, GroupInvitePreview } from "@workspace/api-client-react";
 import type { GroupSettings } from "@/lib/group-settings";
+import type { GroupMemberInvite } from "@/lib/group-member-invites";
 import type { MessageReactionSummary } from "@/lib/message-reactions";
 import type { MessageReplyRef } from "@/lib/message-reply";
 
@@ -173,6 +174,10 @@ export interface ChatsContextType {
   createGroupInviteLink: (conversationId: string) => Promise<GroupInvite>;
   previewGroupInvite: (inviteToken: string) => Promise<GroupInvitePreview>;
   joinGroupWithInvite: (inviteToken: string) => Promise<string>;
+  pendingGroupInvites: GroupMemberInvite[];
+  acceptGroupMemberInvite: (inviteId: string) => Promise<string>;
+  declineGroupMemberInvite: (inviteId: string) => Promise<void>;
+  groupInviteActionId: string | null;
   getOtherUser: (chat: GChat) => GUser | undefined;
   isGroupAdmin: (chat: GChat, userId: string) => boolean;
   recordCall: (

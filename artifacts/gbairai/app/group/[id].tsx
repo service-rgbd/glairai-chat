@@ -22,7 +22,6 @@ import { SearchBar } from "@/components/SearchBar";
 import { useAuth } from "@/contexts/AuthContext";
 import type { ComposeContactOption } from "@/contexts/chats-types";
 import { useChats } from "@/contexts/chats-context-ref";
-import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { useColors } from "@/hooks/useColors";
 import {
   buildGroupInviteShareMessage,
@@ -38,6 +37,7 @@ import {
 } from "@/lib/group-settings";
 import {
   createMediaUploadTarget,
+  getDisplayMediaUrl,
   resolveMediaUrl,
   uploadFileToSignedUrl,
 } from "@/lib/media";
@@ -77,7 +77,6 @@ export default function GroupInfoScreen() {
   const [addMembersLoading, setAddMembersLoading] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<GroupSettings>(DEFAULT_GROUP_SETTINGS);
 
-  const avatarUri = useCachedMediaUrl(chat?.avatarUrl ?? null);
   const initials = chat
     ? getGroupDisplayInitials(chat, users, currentUserId)
     : "GR";
@@ -191,7 +190,10 @@ export default function GroupInfoScreen() {
           mimeType,
         });
         await uploadFileToSignedUrl(target.uploadUrl, asset.uri, mimeType);
-        avatarUrl = await resolveMediaUrl(authToken, target.publicUrl);
+        avatarUrl =
+          target.publicUrl ||
+          (await resolveMediaUrl(authToken, target.key)) ||
+          getDisplayMediaUrl(target.key, target.publicUrl);
       }
 
       await updateGroup(id, { avatarUrl });
@@ -275,6 +277,7 @@ export default function GroupInfoScreen() {
       setAddMembersOpen(false);
       setSelectedMemberIds([]);
       setAddMembersSearch("");
+      Alert.alert("Invitations envoyées", "Les membres devront accepter pour rejoindre le groupe.");
     } catch (error) {
       Alert.alert(
         "Ajout impossible",
@@ -309,7 +312,7 @@ export default function GroupInfoScreen() {
               disabled={!isAdmin || isSaving}
             >
               <Avatar
-                uri={avatarUri}
+                uri={chat.avatarUrl}
                 initials={initials}
                 color={avatarColor}
                 size={96}

@@ -92,6 +92,12 @@ import {
   type MessageReplyRef,
 } from "@/lib/message-reply";
 import {
+  acceptGroupMemberInvite as acceptGroupMemberInviteApi,
+  declineGroupMemberInvite as declineGroupMemberInviteApi,
+  listGroupMemberInvites,
+  type GroupMemberInvite,
+} from "@/lib/group-member-invites";
+import {
   setMessageReaction,
   type MessageReactionSummary,
 } from "@/lib/message-reactions";
@@ -251,6 +257,7 @@ type RealtimeSocketEvent = {
   messageId?: string;
   message?: ConversationMessage;
   reactions?: MessageReactionSummary[];
+  groupMemberInvite?: GroupMemberInvite;
   receipt?: MessageReceipt;
   conversation?: ConversationSummary;
   removedUserId?: string;
@@ -647,6 +654,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const [localStorageReady, setLocalStorageReady] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [typingByConversation, setTypingByConversation] = useState<Record<string, string[]>>({});
+  const [pendingGroupInvites, setPendingGroupInvites] = useState<GroupMemberInvite[]>([]);
+  const [groupInviteActionId, setGroupInviteActionId] = useState<string | null>(null);
   const [e2eDecryptCache, setE2eDecryptCache] = useState<Record<string, string>>({});
   const [e2eDecryptFailed, setE2eDecryptFailed] = useState<Record<string, true>>({});
   const [e2eReady, setE2eReady] = useState(false);
@@ -1239,6 +1248,15 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           event.conversation!,
         ),
       }));
+    });
+    socket.on("group.member_invited", (event?: RealtimeSocketEvent) => {
+      if (!event?.groupMemberInvite) return;
+      setPendingGroupInvites((prev) => {
+        if (prev.some((invite) => invite.id === event.groupMemberInvite!.id)) {
+          return prev;
+        }
+        return [event.groupMemberInvite!, ...prev];
+      });
     });
     socket.on("member.added", (event?: RealtimeSocketEvent) => {
       if (!event?.conversation) {
@@ -2964,6 +2982,38 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     return conversation.id;
   };
 
+  const acceptGroupMemberInvite = async (inviteId: string) => {
+    setGroupInviteActionId(inviteId);
+    try {
+      const result = await acceptGroupMemberInviteApi(inviteId);
+      await applyConversationUpdate(result.conversation);
+      setPendingGroupInvites((prev) => prev.filter((invite) => invite.id !== inviteId));
+      return result.conversation.id;
+    } finally {
+      setGroupInviteActionId(null);
+    }
+  };
+
+  const declineGroupMemberInvite = async (inviteId: string) => {
+    setGroupInviteActionId(inviteId);
+    try {
+      await declineGroupMemberInviteApi(inviteId);
+      setPendingGroupInvites((prev) => prev.filter((invite) => invite.id !== inviteId));
+    } finally {
+      setGroupInviteActionId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setPendingGroupInvites([]);
+      return;
+    }
+    void listGroupMemberInvites()
+      .then((result) => setPendingGroupInvites(result.invites))
+      .catch(() => {});
+  }, [isAuthenticated, authToken]);
+
   const getOtherUser = (chat: GChat) => {
     if (chat.type === "group") return undefined;
     const otherId = chat.participantIds.find((id) => id !== currentUserId);
@@ -3193,6 +3243,10 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         createGroupInviteLink,
         previewGroupInvite,
         joinGroupWithInvite,
+        pendingGroupInvites,
+        acceptGroupMemberInvite,
+        declineGroupMemberInvite,
+        groupInviteActionId,
         getOtherUser,
         isGroupAdmin,
         recordCall,

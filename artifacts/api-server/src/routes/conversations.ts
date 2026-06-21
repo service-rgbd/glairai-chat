@@ -75,6 +75,56 @@ router.post("/conversations/join", requireAuth, async (req: AuthenticatedRequest
   }
 });
 
+router.get("/group-member-invites", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const result = await chatService.listGroupMemberInvites(req.authToken!);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      message:
+        error instanceof Error ? error.message : "Impossible de charger les invitations",
+    });
+  }
+});
+
+router.post(
+  "/group-member-invites/:inviteId/accept",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const result = await chatService.acceptGroupMemberInvite(
+        req.authToken!,
+        getSingleParam(req.params["inviteId"]),
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error ? error.message : "Impossible d'accepter l'invitation",
+      });
+    }
+  },
+);
+
+router.post(
+  "/group-member-invites/:inviteId/decline",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const result = await chatService.declineGroupMemberInvite(
+        req.authToken!,
+        getSingleParam(req.params["inviteId"]),
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error ? error.message : "Impossible de refuser l'invitation",
+      });
+    }
+  },
+);
+
 router.get(
   "/conversations/:conversationId",
   requireAuth,

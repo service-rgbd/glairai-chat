@@ -10,6 +10,7 @@ import {
 } from "./message-meta";
 import {
   contactEdgesTable,
+  conversationMemberInvitesTable,
   conversationMembersTable,
   conversationsTable,
   db,
@@ -151,6 +152,7 @@ export interface RealtimeEvent {
     | "conversation.updated"
     | "member.added"
     | "member.removed"
+    | "group.member_invited"
     | "call.invited"
     | "call.answered"
     | "call.cancelled"
@@ -166,6 +168,7 @@ export interface RealtimeEvent {
   receipt?: MessageReceipt;
   presence?: { userId: string; snapshot: PresenceSnapshot };
   conversation?: ConversationSummary;
+  groupMemberInvite?: GroupMemberInviteSummary;
   removedUserId?: string;
   callerUserId?: string;
   callerName?: string;
@@ -186,6 +189,16 @@ export interface GroupInvitePreview {
   avatarUrl: string | null;
   memberCount: number;
   expiresAt: string;
+}
+
+export interface GroupMemberInviteSummary {
+  id: string;
+  conversationId: string;
+  conversationTitle: string | null;
+  conversationAvatarUrl: string | null;
+  invitedByUserId: string;
+  invitedByName: string;
+  createdAt: string;
 }
 
 type Awaitable<T> = T | Promise<T>;
@@ -468,6 +481,7 @@ const MESSAGE_DELETE_WINDOW_MS = 15 * 60_000;
 const MAX_DEVICE_NAME_LENGTH = 100;
 const MAX_GROUP_MEMBERS = 100;
 const GROUP_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const GROUP_CREATE_COOLDOWN_MS = 60 * 1000;
 
 function buildGroupInviteUrl(token: string) {
   return `gbairai://group/join?token=${encodeURIComponent(token)}`;
@@ -623,6 +637,49 @@ async function sendExpoPushMessages(
     }
   } catch (error) {
     logger.warn({ err: error }, "Expo push send error");
+  }
+}
+
+async function sendGroupMemberInvitePushes(
+  devices: Array<{ pushToken: string }>,
+  inviterName: string,
+  groupName: string,
+  input: { inviteId: string; conversationId: string },
+) {
+  const validDevices = devices.filter((device) => device.pushToken.startsWith("ExponentPushToken["));
+  if (!validDevices.length) return;
+
+  const payload = validDevices.map((device) => ({
+    to: device.pushToken,
+    title: "Invitation de groupe",
+    body: `${inviterName} vous invite à rejoindre « ${groupName} »`,
+    sound: "default",
+    priority: "high" as const,
+    channelId: "messages",
+    data: {
+      type: "group_invite",
+      inviteId: input.inviteId,
+      conversationId: input.conversationId,
+    },
+  }));
+
+  try {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      logger.warn(
+        { status: response.status, recipientCount: validDevices.length },
+        "Expo group invite push send failed",
+      );
+    }
+  } catch (error) {
+    logger.warn({ err: error }, "Expo group invite push send error");
   }
 }
 
@@ -1918,6 +1975,23 @@ class DatabaseChatService implements ChatService {
       }
     }
 
+    if (type === "group") {
+      const [recentGroup] = await db!
+        .select({ id: conversationsTable.id })
+        .from(conversationsTable)
+        .where(
+          and(
+            eq(conversationsTable.createdBy, currentUser.id),
+            eq(conversationsTable.type, "group"),
+            gte(conversationsTable.createdAt, new Date(Date.now() - GROUP_CREATE_COOLDOWN_MS)),
+          ),
+        )
+        .limit(1);
+      if (recentGroup) {
+        throw new Error("Veuillez attendre une minute avant de créer un autre groupe.");
+      }
+    }
+
     const conversationId = randomId("conv");
     const now = new Date();
     const groupSettings =
@@ -1938,8 +2012,11 @@ class DatabaseChatService implements ChatService {
       groupSettings,
     });
 
+    const inviteeIds =
+      type === "group" ? ids.filter((userId) => userId !== currentUser.id) : ids;
+
     await db!.insert(conversationMembersTable).values(
-      ids.map((userId) => ({
+      (type === "group" ? [currentUser.id] : ids).map((userId) => ({
         conversationId,
         userId,
         unreadCount: 0,
@@ -1947,10 +2024,14 @@ class DatabaseChatService implements ChatService {
       })),
     );
 
+    if (type === "group" && inviteeIds.length > 0) {
+      await this.sendConversationMemberInvites(conversationId, currentUser.id, inviteeIds);
+    }
+
     const summary = await this.toConversationSummary(conversationId, currentUser.id);
     this.publish({
       type: "conversation.created",
-      participantIds: ids,
+      participantIds: type === "group" ? [currentUser.id] : ids,
       conversation: summary,
     });
 
@@ -2081,13 +2162,10 @@ class DatabaseChatService implements ChatService {
       throw new Error("Le groupe dépasse la limite de participants autorisés");
     }
 
-    await db!.insert(conversationMembersTable).values(
-      Array.from(newMemberIds).map((memberId) => ({
-        conversationId,
-        userId: memberId,
-        unreadCount: 0,
-        lastReadMessageId: null,
-      })),
+    await this.sendConversationMemberInvites(
+      conversationId,
+      user.id,
+      Array.from(newMemberIds),
     );
 
     await db!
@@ -2095,16 +2173,220 @@ class DatabaseChatService implements ChatService {
       .set({ updatedAt: new Date() })
       .where(eq(conversationsTable.id, conversationId));
 
-    const participantIds = await this.getConversationParticipantIds(conversationId);
-    const summary = await this.toConversationSummary(conversationId, user.id);
+    return this.toConversationSummary(conversationId, user.id);
+  }
+
+  async listGroupMemberInvites(token: string) {
+    const user = await this.requireUserByToken(token);
+    const rows = await db!
+      .select({
+        id: conversationMemberInvitesTable.id,
+        conversationId: conversationMemberInvitesTable.conversationId,
+        invitedByUserId: conversationMemberInvitesTable.invitedByUserId,
+        createdAt: conversationMemberInvitesTable.createdAt,
+        title: conversationsTable.title,
+        avatarUrl: conversationsTable.avatarUrl,
+        invitedByName: usersTable.name,
+      })
+      .from(conversationMemberInvitesTable)
+      .innerJoin(
+        conversationsTable,
+        eq(conversationsTable.id, conversationMemberInvitesTable.conversationId),
+      )
+      .innerJoin(usersTable, eq(usersTable.id, conversationMemberInvitesTable.invitedByUserId))
+      .where(
+        and(
+          eq(conversationMemberInvitesTable.invitedUserId, user.id),
+          eq(conversationMemberInvitesTable.status, "pending"),
+        ),
+      )
+      .orderBy(desc(conversationMemberInvitesTable.createdAt));
+
+    return {
+      invites: rows.map((row) => ({
+        id: row.id,
+        conversationId: row.conversationId,
+        conversationTitle: row.title,
+        conversationAvatarUrl: row.avatarUrl,
+        invitedByUserId: row.invitedByUserId,
+        invitedByName: row.invitedByName,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  async acceptGroupMemberInvite(token: string, inviteId: string) {
+    const user = await this.requireUserByToken(token);
+    const [invite] = await db!
+      .select()
+      .from(conversationMemberInvitesTable)
+      .where(
+        and(
+          eq(conversationMemberInvitesTable.id, inviteId),
+          eq(conversationMemberInvitesTable.invitedUserId, user.id),
+          eq(conversationMemberInvitesTable.status, "pending"),
+        ),
+      )
+      .limit(1);
+
+    if (!invite) {
+      throw new Error("Invitation introuvable ou expirée");
+    }
+
+    const memberIds = await this.getConversationParticipantIds(invite.conversationId);
+    if (!memberIds.includes(user.id)) {
+      if (memberIds.length >= MAX_GROUP_MEMBERS) {
+        throw new Error("Ce groupe est complet");
+      }
+      await db!.insert(conversationMembersTable).values({
+        conversationId: invite.conversationId,
+        userId: user.id,
+        unreadCount: 0,
+        lastReadMessageId: null,
+      });
+    }
+
+    await db!
+      .update(conversationMemberInvitesTable)
+      .set({ status: "accepted", respondedAt: new Date() })
+      .where(eq(conversationMemberInvitesTable.id, invite.id));
+
+    const participantIds = await this.getConversationParticipantIds(invite.conversationId);
+    const summary = await this.toConversationSummary(invite.conversationId, user.id);
     this.publish({
       type: "member.added",
       participantIds,
-      conversationId,
+      conversationId: invite.conversationId,
       conversation: summary,
     });
 
-    return summary;
+    return { conversation: summary };
+  }
+
+  async declineGroupMemberInvite(token: string, inviteId: string) {
+    const user = await this.requireUserByToken(token);
+    const [invite] = await db!
+      .select()
+      .from(conversationMemberInvitesTable)
+      .where(
+        and(
+          eq(conversationMemberInvitesTable.id, inviteId),
+          eq(conversationMemberInvitesTable.invitedUserId, user.id),
+          eq(conversationMemberInvitesTable.status, "pending"),
+        ),
+      )
+      .limit(1);
+
+    if (!invite) {
+      throw new Error("Invitation introuvable ou expirée");
+    }
+
+    await db!
+      .update(conversationMemberInvitesTable)
+      .set({ status: "declined", respondedAt: new Date() })
+      .where(eq(conversationMemberInvitesTable.id, invite.id));
+
+    return { success: true };
+  }
+
+  private async sendConversationMemberInvites(
+    conversationId: string,
+    invitedByUserId: string,
+    userIds: string[],
+  ) {
+    const uniqueIds = [...new Set(userIds.filter((userId) => userId !== invitedByUserId))];
+    if (!uniqueIds.length) return;
+
+    const existingMemberIds = new Set(await this.getConversationParticipantIds(conversationId));
+    const [inviter] = await db!
+      .select({ name: usersTable.name })
+      .from(usersTable)
+      .where(eq(usersTable.id, invitedByUserId))
+      .limit(1);
+    const [conversation] = await db!
+      .select({ title: conversationsTable.title, avatarUrl: conversationsTable.avatarUrl })
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, conversationId))
+      .limit(1);
+    const groupName = conversation?.title?.trim() || "Groupe";
+    const inviterName = inviter?.name?.trim() || "Quelqu'un";
+
+    const createdInvites: Array<GroupMemberInviteSummary & { invitedUserId: string }> = [];
+
+    for (const invitedUserId of uniqueIds) {
+      if (existingMemberIds.has(invitedUserId)) continue;
+
+      const [pendingInvite] = await db!
+        .select({ id: conversationMemberInvitesTable.id })
+        .from(conversationMemberInvitesTable)
+        .where(
+          and(
+            eq(conversationMemberInvitesTable.conversationId, conversationId),
+            eq(conversationMemberInvitesTable.invitedUserId, invitedUserId),
+            eq(conversationMemberInvitesTable.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (pendingInvite) continue;
+
+      await db!
+        .delete(conversationMemberInvitesTable)
+        .where(
+          and(
+            eq(conversationMemberInvitesTable.conversationId, conversationId),
+            eq(conversationMemberInvitesTable.invitedUserId, invitedUserId),
+            eq(conversationMemberInvitesTable.status, "declined"),
+          ),
+        );
+
+      const inviteId = randomId("ginv");
+      const createdAt = new Date();
+      await db!.insert(conversationMemberInvitesTable).values({
+        id: inviteId,
+        conversationId,
+        invitedUserId,
+        invitedByUserId,
+        status: "pending",
+        createdAt,
+      });
+
+      const inviteSummary = {
+        id: inviteId,
+        conversationId,
+        conversationTitle: conversation?.title ?? null,
+        conversationAvatarUrl: conversation?.avatarUrl ?? null,
+        invitedByUserId,
+        invitedByName: inviterName,
+        createdAt: createdAt.toISOString(),
+        invitedUserId,
+      };
+      createdInvites.push(inviteSummary);
+
+      const devices = await db!
+        .select({ pushToken: deviceTokensTable.pushToken })
+        .from(deviceTokensTable)
+        .innerJoin(usersTable, eq(usersTable.id, deviceTokensTable.userId))
+        .where(
+          and(
+            eq(deviceTokensTable.userId, invitedUserId),
+            eq(usersTable.notificationsEnabled, true),
+          ),
+        );
+      void sendGroupMemberInvitePushes(devices, inviterName, groupName, {
+        inviteId,
+        conversationId,
+      });
+    }
+
+    for (const invite of createdInvites) {
+      const { invitedUserId: targetUserId, ...groupMemberInvite } = invite;
+      this.publish({
+        type: "group.member_invited",
+        participantIds: [targetUserId],
+        conversationId,
+        groupMemberInvite,
+      });
+    }
   }
 
   async removeConversationMember(token: string, conversationId: string, targetUserId: string) {

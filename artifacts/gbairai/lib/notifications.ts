@@ -40,6 +40,12 @@ function isNewMessagePushData(data: unknown): data is { type: "new_message"; con
   return record.type === "new_message" && typeof record.conversationId === "string";
 }
 
+function isChannelPostPushData(data: unknown): data is { type: "channel_post"; channelId: string } {
+  if (!data || typeof data !== "object") return false;
+  const record = data as Record<string, unknown>;
+  return record.type === "channel_post" && typeof record.channelId === "string";
+}
+
 function showIncomingCallOverlay(data: IncomingCallPushData) {
   if (!shouldAcceptIncomingCall(data.callId)) return;
   setIncomingCall({
@@ -56,13 +62,37 @@ function openMessageConversation(conversationId: string) {
   router.push(`/chat/${conversationId}`);
 }
 
+function openChannel(channelId: string) {
+  router.push(`/channel/${channelId}`);
+}
+
+function isGroupInvitePushData(
+  data: unknown,
+): data is { type: "group_invite"; inviteId: string; conversationId: string } {
+  if (!data || typeof data !== "object") return false;
+  const record = data as Record<string, unknown>;
+  return (
+    record.type === "group_invite" &&
+    typeof record.inviteId === "string" &&
+    typeof record.conversationId === "string"
+  );
+}
+
 function handleNotificationResponse(data: unknown) {
   if (isIncomingCallPushData(data)) {
     showIncomingCallOverlay(data);
     return;
   }
+  if (isGroupInvitePushData(data)) {
+    router.push("/(tabs)/(main)");
+    return;
+  }
   if (isNewMessagePushData(data)) {
     openMessageConversation(data.conversationId);
+    return;
+  }
+  if (isChannelPostPushData(data)) {
+    openChannel(data.channelId);
   }
 }
 
@@ -76,9 +106,11 @@ function ensureNotificationHandler() {
     handleNotification: async (notification) => {
       const data = notification.request.content.data;
       const isMessage = isNewMessagePushData(data);
+      const isChannelPost = isChannelPostPushData(data);
+      const isGroupInvite = isGroupInvitePushData(data);
       const isForeground = AppState.currentState === "active";
 
-      if (isMessage && isForeground) {
+      if ((isMessage || isChannelPost) && isForeground) {
         return {
           shouldShowAlert: false,
           shouldPlaySound: false,
@@ -175,6 +207,14 @@ export async function registerForPushNotificationsAsync() {
       sound: "incoming.wav",
       bypassDnd: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
+
+    await Notifications.setNotificationChannelAsync("channels", {
+      name: "Chaînes",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 200, 250],
+      lightColor: "#25D366",
+      sound: "default",
     });
   }
 
