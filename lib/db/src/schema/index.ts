@@ -195,6 +195,25 @@ export const messageReceiptsTable = pgTable(
   }),
 );
 
+export const messageReactionsTable = pgTable(
+  "message_reactions",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messagesTable.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.messageId, table.userId] }),
+    messageIdx: index("message_reactions_message_idx").on(table.messageId),
+    userIdx: index("message_reactions_user_idx").on(table.userId),
+  }),
+);
+
 export const deviceTokensTable = pgTable("device_tokens", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -393,6 +412,7 @@ export const messageRelations = relations(messagesTable, ({ many, one }) => ({
     references: [usersTable.id],
   }),
   receipts: many(messageReceiptsTable),
+  reactions: many(messageReactionsTable),
 }));
 
 export const messageReceiptRelations = relations(messageReceiptsTable, ({ one }) => ({
@@ -402,6 +422,17 @@ export const messageReceiptRelations = relations(messageReceiptsTable, ({ one })
   }),
   user: one(usersTable, {
     fields: [messageReceiptsTable.userId],
+    references: [usersTable.id],
+  }),
+}));
+
+export const messageReactionRelations = relations(messageReactionsTable, ({ one }) => ({
+  message: one(messagesTable, {
+    fields: [messageReactionsTable.messageId],
+    references: [messagesTable.id],
+  }),
+  user: one(usersTable, {
+    fields: [messageReactionsTable.userId],
     references: [usersTable.id],
   }),
 }));

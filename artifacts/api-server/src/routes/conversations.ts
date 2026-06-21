@@ -289,6 +289,35 @@ router.post(
   },
 );
 
+router.post(
+  "/messages/:messageId/reactions",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const emoji =
+        typeof req.body?.emoji === "string"
+          ? req.body.emoji
+          : req.body?.emoji === null
+            ? null
+            : undefined;
+      if (emoji === undefined) {
+        throw new Error("Réaction invalide");
+      }
+      const result = await chatService.setMessageReaction(
+        req.authToken!,
+        getSingleParam(req.params["messageId"]),
+        emoji,
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error ? error.message : "Impossible d'ajouter la réaction",
+      });
+    }
+  },
+);
+
 router.delete(
   "/messages/:messageId",
   requireAuth,

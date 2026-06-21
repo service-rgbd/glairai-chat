@@ -43,9 +43,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useQueryHydrated } from "@/contexts/QueryHydrationContext";
 import { getApiBaseUrl } from "@/lib/api-config";
 import {
+  isContactsPermissionDenied,
   isContactsSyncFresh,
   markContactsPermissionDenied,
   markContactsSynced,
+  resetContactsPermissionState,
   resetContactsSyncState,
   runContactsSyncOnce,
 } from "@/lib/contacts-sync";
@@ -82,7 +84,17 @@ import {
   encodeEditedTextMessageContent,
   getMessageDisplayContent,
 } from "@/lib/message-meta";
+import { MessageSoundsBridge } from "@/components/MessageSoundsBridge";
 import { parseGroupSettings } from "@/lib/group-settings";
+import {
+  encodeTextMessageContent,
+  extractReplyFromContent,
+  type MessageReplyRef,
+} from "@/lib/message-reply";
+import {
+  setMessageReaction,
+  type MessageReactionSummary,
+} from "@/lib/message-reactions";
 import { runWithUploadStatus } from "@/lib/upload-status";
 import {
   E2E_FALLBACK_LABEL,
@@ -90,6 +102,7 @@ import {
   encryptDirectTextMessage,
   isE2eEnabled,
   isE2ePayload,
+  resetE2eBootstrapCache,
   shouldEncryptDirectText,
   tryDecryptDirectTextMessage,
 } from "@/lib/e2e";
@@ -193,6 +206,32 @@ const INITIAL_STORIES: GStory[] = [
 const ONLINE_PRESENCE_INTERVAL = 20_000;
 const CONVERSATIONS_STALE_MS = 1000 * 60 * 2;
 const MESSAGES_STALE_MS = 1000 * 60 * 10;
+const E2E_PLAINTEXT_CACHE_PREFIX = "@gbairai/e2e/plaintext:";
+const E2E_PLAINTEXT_CACHE_LIMIT = 500;
+const MUTED_CONVERSATIONS_PREFIX = "@gbairai/conversations/muted:";
+
+function e2ePlaintextCacheKey(userId: string) {
+  return `${E2E_PLAINTEXT_CACHE_PREFIX}${userId}`;
+}
+
+function mutedConversationsKey(userId: string) {
+  return `${MUTED_CONVERSATIONS_PREFIX}${userId}`;
+}
+
+function isHttpNotFound(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: number }).status === 404
+  );
+}
+
+function trimE2ePlaintextCache(cache: Record<string, string>) {
+  const entries = Object.entries(cache);
+  if (entries.length <= E2E_PLAINTEXT_CACHE_LIMIT) return cache;
+  return Object.fromEntries(entries.slice(entries.length - E2E_PLAINTEXT_CACHE_LIMIT));
+}
 
 const ChatsReactContext = getOrCreateChatsContext();
 
@@ -205,12 +244,13 @@ export function useChats(): ChatsContextType {
 }
 
 type ConversationsPage = { conversations: ConversationSummary[] };
-type ExtendedConversationSummary = ConversationSummary & { isArchived?: boolean };
+type ExtendedConversationSummary = ConversationSummary & { isArchived?: boolean; isMuted?: boolean };
 type MessagesPage = { messages: ConversationMessage[]; nextCursor: string | null };
 type RealtimeSocketEvent = {
   conversationId?: string;
   messageId?: string;
   message?: ConversationMessage;
+  reactions?: MessageReactionSummary[];
   receipt?: MessageReceipt;
   conversation?: ConversationSummary;
   removedUserId?: string;
@@ -234,6 +274,7 @@ type OutboxItem = {
   type: MessageType;
   createdAt: string;
   status: "sending" | "failed";
+  replyTo?: MessageReplyRef;
 };
 
 function normalizePhoneNumber(phone: string, defaultCountryCode = "GN") {
@@ -336,19 +377,35 @@ function resolveE2eSessionPeerUserId(
 ) {
   if (senderId !== currentUserId) return senderId;
   const conversation = conversations.get(conversationId);
-  if (!conversation) return senderId;
-  return getDirectPeerUserId(conversation, currentUserId) ?? senderId;
+  if (!conversation) return null;
+  return getDirectPeerUserId(conversation, currentUserId);
 }
 
 function toReadableMessageContent(
   message: Pick<ConversationMessage, "content">,
   decryptedContent?: string,
+  decryptFailed?: boolean,
 ) {
-  if (!decryptedContent && isE2ePayload(message.content)) {
-    return E2E_FALLBACK_LABEL;
+  if (decryptedContent) {
+    return getMessageDisplayContent(decryptedContent).displayContent;
   }
-  const source = decryptedContent ?? message.content;
-  return getMessageDisplayContent(source).displayContent;
+  if (isE2ePayload(message.content)) {
+    if (decryptFailed) {
+      return E2E_FALLBACK_LABEL;
+    }
+    // Déchiffrement en cours : ne rien afficher (le message est masqué
+    // de la liste tant que le texte en clair n'est pas disponible).
+    return "";
+  }
+  return getMessageDisplayContent(message.content).displayContent;
+}
+
+function isPendingE2eDecrypt(
+  message: Pick<ConversationMessage, "content">,
+  decryptedContent?: string,
+  decryptFailed?: boolean,
+) {
+  return isE2ePayload(message.content) && !decryptedContent && !decryptFailed;
 }
 
 function toGMessageMeta(
@@ -523,23 +580,48 @@ function upsertReceipt(
   return nextReceipts;
 }
 
+function toGMessageContent(
+  message: Pick<ConversationMessage, "content" | "type">,
+  decryptedContent?: string,
+  decryptFailed?: boolean,
+) {
+  if (message.type !== "text") {
+    return message.content;
+  }
+  const source = decryptedContent ?? message.content;
+  if (!isE2ePayload(message.content) || decryptedContent) {
+    const extracted = extractReplyFromContent(source);
+    if (extracted.replyTo) {
+      return getMessageDisplayContent(extracted.body).displayContent;
+    }
+  }
+  return toReadableMessageContent(message, decryptedContent, decryptFailed);
+}
+
 function toGMessage(
-  message: ConversationMessage,
+  message: ConversationMessage & { reactions?: MessageReactionSummary[] },
   currentUserId: string,
   toMessageStatus: (message: ConversationMessage, currentUserId: string) => MessageStatus,
   decryptedContent?: string,
+  decryptFailed?: boolean,
 ): GMessage {
   const meta = toGMessageMeta(message, decryptedContent);
+  let replyTo: MessageReplyRef | undefined;
+  if (message.type === "text" && (!isE2ePayload(message.content) || decryptedContent)) {
+    replyTo = extractReplyFromContent(decryptedContent ?? message.content).replyTo ?? undefined;
+  }
   return {
     id: message.id,
     chatId: message.conversationId,
     senderId: message.senderId,
-    content: toReadableMessageContent(message, decryptedContent),
+    content: toGMessageContent(message, decryptedContent, decryptFailed),
     type: meta.isDeleted ? "text" : message.type,
     status: toMessageStatus(message, currentUserId),
     timestamp: message.createdAt,
     editedAt: meta.editedAt,
     isDeleted: meta.isDeleted,
+    replyTo,
+    reactions: Array.isArray(message.reactions) ? message.reactions : [],
   };
 }
 
@@ -560,13 +642,18 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const [calls, setCalls] = useState<GCall[]>([]);
   const [callsLastSeenAt, setCallsLastSeenAt] = useState<string | null>(null);
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
+  const [localMutedConversationIds, setLocalMutedConversationIds] = useState<string[]>([]);
   const [localCacheHydrated, setLocalCacheHydrated] = useState(false);
   const [localStorageReady, setLocalStorageReady] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [typingByConversation, setTypingByConversation] = useState<Record<string, string[]>>({});
   const [e2eDecryptCache, setE2eDecryptCache] = useState<Record<string, string>>({});
+  const [e2eDecryptFailed, setE2eDecryptFailed] = useState<Record<string, true>>({});
+  const [e2eReady, setE2eReady] = useState(false);
   const e2eDecryptInflightRef = useRef(new Set<string>());
   const e2eDecryptCacheRef = useRef<Record<string, string>>({});
+  const e2eDecryptFailedRef = useRef<Record<string, true>>({});
+  const e2eDecryptWarnedRef = useRef(new Set<string>());
   const socketRef = useRef<Socket | null>(null);
   const isFlushingOutbox = useRef(false);
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -575,8 +662,15 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const presenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadedConversationIdsRef = useRef<string[]>([]);
   const activeConversationIdsRef = useRef<Set<string>>(new Set());
+  const playConversationListSoundRef = useRef<(() => void) | null>(null);
+  const playChatIncomingSoundRef = useRef<(() => void) | null>(null);
   const cachedUserIdRef = useRef<string | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const localMutedConversationIdsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    localMutedConversationIdsRef.current = localMutedConversationIds;
+  }, [localMutedConversationIds]);
 
   useEffect(() => {
     if (!isAuthenticated || !currentUser?.id) {
@@ -590,13 +684,21 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       try {
         await migrateLegacyUserCache(userId);
 
-        const [rawOutbox, rawComposeContacts, rawCalls, rawLoadedConversations, rawCallsLastSeenAt] =
+        const [
+          rawOutbox,
+          rawComposeContacts,
+          rawCalls,
+          rawLoadedConversations,
+          rawCallsLastSeenAt,
+          rawMutedConversations,
+        ] =
           await Promise.all([
             safeGetItem(UserCacheKeys.outbox(userId)),
             safeGetItem(UserCacheKeys.composeContacts(userId)),
             safeGetItem(UserCacheKeys.calls(userId)),
             safeGetItem(UserCacheKeys.loadedConversations(userId)),
             safeGetItem(UserCacheKeys.callsLastSeenAt(userId)),
+            safeGetItem(mutedConversationsKey(userId)),
           ]);
 
         if (cancelled) return;
@@ -631,6 +733,12 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         } else {
           setCallsLastSeenAt(new Date().toISOString());
         }
+        if (rawMutedConversations) {
+          const parsed = JSON.parse(rawMutedConversations) as string[];
+          setLocalMutedConversationIds(Array.isArray(parsed) ? parsed : []);
+        } else {
+          setLocalMutedConversationIds([]);
+        }
       } catch {
         // ignore
       } finally {
@@ -645,6 +753,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       setOutbox([]);
       setCalls([]);
       setComposeContactsSnapshot([]);
+      setLocalMutedConversationIds([]);
     }
     cachedUserIdRef.current = userId;
 
@@ -680,6 +789,14 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       JSON.stringify(loadedConversationIds),
     );
   }, [loadedConversationIds, currentUser?.id, localStorageReady, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
+    return scheduleSafeSetItem(
+      mutedConversationsKey(currentUser.id),
+      JSON.stringify(localMutedConversationIds),
+    );
+  }, [currentUser?.id, isAuthenticated, localMutedConversationIds, localStorageReady]);
 
   useEffect(() => {
     if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
@@ -853,7 +970,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           nextCursor: current?.nextCursor ?? null,
         }));
         if (isE2ePayload(wireContent)) {
-          setE2eDecryptCache((prev) => ({ ...prev, [sentMessage.id]: queued.content }));
+          persistE2ePlaintextCache({ [sentMessage.id]: queued.content });
         }
         setOutbox((prev) => prev.filter((item) => item.localId !== queued.localId));
       }
@@ -908,13 +1025,17 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         }
 
         socketRef.current = socket;
+        const activeSocket = socket;
 
-        socket.on("connect", () => {
+        activeSocket.on("connect", () => {
           if (__DEV__) {
             console.log("[Gbairai] socket connecté");
           }
           setSocketConnected(true);
-          socket.emit("presence:heartbeat", { isOnline: appStateRef.current === "active" });
+          if (currentUser?.id) {
+            void ensureE2eDeviceRegistered(currentUser.id, { forceRegister: true });
+          }
+          activeSocket.emit("presence:heartbeat", { isOnline: appStateRef.current === "active" });
           void queryClient.refetchQueries({ queryKey: ["conversations"], stale: true });
           void Promise.all(
             loadedConversationIdsRef.current.map((chatId) =>
@@ -922,7 +1043,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             ),
           );
           for (const chatId of activeConversationIdsRef.current) {
-            socket?.emit("conversation:join", { conversationId: chatId });
+            activeSocket.emit("conversation:join", { conversationId: chatId });
           }
         });
 
@@ -954,12 +1075,52 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         nextCursor: current?.nextCursor ?? null,
       }));
       if (event.message.senderId === currentUser?.id) {
-        setOutbox((prev) => removeMatchingSendingOutboxItem(prev, event.message!));
+        if (isE2ePayload(event.message.content)) {
+          // L'écho socket arrive souvent avant la réponse HTTP : le contenu
+          // est chiffré et ne correspond plus à l'item optimiste. On récupère
+          // le texte en clair depuis l'outbox pour un affichage instantané.
+          setOutbox((prev) => {
+            const matchIndex = prev.findIndex(
+              (item) =>
+                item.status === "sending" &&
+                item.chatId === event.conversationId &&
+                item.type === event.message!.type,
+            );
+            if (matchIndex < 0) return prev;
+            const matched = prev[matchIndex]!;
+            persistE2ePlaintextCache({ [event.message!.id]: matched.content });
+            return prev.filter((_, index) => index !== matchIndex);
+          });
+        } else {
+          setOutbox((prev) => removeMatchingSendingOutboxItem(prev, event.message!));
+        }
       } else {
         socketRef.current?.emit("messages:delivered", { messageId: event.message.id });
+        const isActiveConversation = activeConversationIdsRef.current.has(event.conversationId);
+        const isMutedConversation = Boolean(
+          queryClient
+            .getQueryData<ConversationsPage>(["conversations"])
+            ?.conversations.find((conversation) => conversation.id === event.conversationId)?.isMuted ||
+            localMutedConversationIdsRef.current.includes(event.conversationId),
+        );
+        if (currentUser?.settings.notificationSoundEnabled !== false && !isMutedConversation) {
+          if (isActiveConversation) {
+            playChatIncomingSoundRef.current?.();
+          } else {
+            playConversationListSoundRef.current?.();
+          }
+        }
       }
       if (currentUser?.id) {
         const isActiveConversation = activeConversationIdsRef.current.has(event.conversationId);
+        const hasConversationSummary = Boolean(
+          queryClient
+            .getQueryData<ConversationsPage>(["conversations"])
+            ?.conversations.some((conversation) => conversation.id === event.conversationId),
+        );
+        if (!hasConversationSummary) {
+          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
         queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
           conversations: updateConversationSummaryWithMessage(
             current?.conversations ?? [],
@@ -1005,6 +1166,18 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      if (isE2ePayload(event.message.content) && event.message.senderId !== currentUser?.id) {
+        e2eDecryptInflightRef.current.delete(event.message.id);
+        e2eDecryptCacheRef.current = Object.fromEntries(
+          Object.entries(e2eDecryptCacheRef.current).filter(([id]) => id !== event.message!.id),
+        );
+        e2eDecryptFailedRef.current = Object.fromEntries(
+          Object.entries(e2eDecryptFailedRef.current).filter(([id]) => id !== event.message!.id),
+        );
+        setE2eDecryptCache(e2eDecryptCacheRef.current);
+        setE2eDecryptFailed(e2eDecryptFailedRef.current);
+      }
+
       queryClient.setQueryData<MessagesPage>(["messages", event.conversationId], (current) => ({
         messages: upsertConversationMessage(current?.messages ?? [], event.message!),
         nextCursor: current?.nextCursor ?? null,
@@ -1014,6 +1187,21 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           current?.conversations ?? [],
           event.message!,
         ),
+      }));
+    });
+
+    socket.on("message.reaction", (event?: RealtimeSocketEvent) => {
+      if (!event?.conversationId || !event.messageId || !event.reactions) {
+        return;
+      }
+
+      queryClient.setQueryData<MessagesPage>(["messages", event.conversationId], (current) => ({
+        messages: (current?.messages ?? []).map((message) =>
+          message.id === event.messageId
+            ? { ...message, reactions: event.reactions }
+            : message,
+        ),
+        nextCursor: current?.nextCursor ?? null,
       }));
     });
 
@@ -1413,8 +1601,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     resetContactsSyncState();
     setTypingByConversation({});
     setE2eDecryptCache({});
+    setE2eDecryptFailed({});
+    setE2eReady(false);
+    resetE2eBootstrapCache();
     e2eDecryptCacheRef.current = {};
+    e2eDecryptFailedRef.current = {};
     e2eDecryptInflightRef.current.clear();
+    e2eDecryptWarnedRef.current.clear();
     lastReadMessageByChatRef.current = {};
     activeConversationIdsRef.current.clear();
   }, [isAuthenticated]);
@@ -1424,12 +1617,73 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   }, [e2eDecryptCache]);
 
   useEffect(() => {
-    if (!isE2eEnabled() || !authToken || !currentUser?.id) return;
-    void ensureE2eDeviceRegistered(currentUser.id).catch((error) => {
-      if (__DEV__) {
-        console.warn("[Gbairai] E2E bootstrap:", error);
+    if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
+    let cancelled = false;
+    void (async () => {
+      const raw = await safeGetItem(e2ePlaintextCacheKey(currentUser.id));
+      if (!raw || cancelled) return;
+      try {
+        const cached = JSON.parse(raw) as Record<string, string>;
+        e2eDecryptCacheRef.current = trimE2ePlaintextCache({
+          ...e2eDecryptCacheRef.current,
+          ...cached,
+        });
+        setE2eDecryptCache(e2eDecryptCacheRef.current);
+      } catch {
+        // Cache local best-effort : un contenu invalide sera simplement ignoré.
       }
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, isAuthenticated, localStorageReady]);
+
+  useEffect(() => {
+    e2eDecryptFailedRef.current = e2eDecryptFailed;
+  }, [e2eDecryptFailed]);
+
+  const persistE2ePlaintextCache = useCallback(
+    (updates: Record<string, string>) => {
+      if (!currentUser?.id || !Object.keys(updates).length) return;
+      const userId = currentUser.id;
+      e2eDecryptCacheRef.current = trimE2ePlaintextCache({
+        ...e2eDecryptCacheRef.current,
+        ...updates,
+      });
+      setE2eDecryptCache(e2eDecryptCacheRef.current);
+      void (async () => {
+        let stored: Record<string, string> = {};
+        const raw = await safeGetItem(e2ePlaintextCacheKey(userId));
+        if (raw) {
+          try {
+            stored = JSON.parse(raw) as Record<string, string>;
+          } catch {
+            stored = {};
+          }
+        }
+        await safeSetItem(
+          e2ePlaintextCacheKey(userId),
+          JSON.stringify(trimE2ePlaintextCache({ ...stored, ...updates })),
+        );
+      })();
+    },
+    [currentUser?.id],
+  );
+
+  useEffect(() => {
+    if (!isE2eEnabled() || !authToken || !currentUser?.id) return;
+    void ensureE2eDeviceRegistered(currentUser.id, { forceRegister: true })
+      .then((keys) => {
+        if (keys) {
+          e2eDecryptInflightRef.current.clear();
+          setE2eReady(true);
+        }
+      })
+      .catch((error) => {
+        if (__DEV__) {
+          console.warn("[Gbairai] E2E bootstrap:", error);
+        }
+      });
   }, [authToken, currentUser?.id]);
 
   const conversationSummaries = conversationsQuery.data?.conversations ?? [];
@@ -1531,6 +1785,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             createdBy: conversation.createdBy,
             unreadCount: conversation.unreadCount,
             isArchived: Boolean(extended.isArchived),
+            isMuted: Boolean(extended.isMuted || localMutedConversationIds.includes(conversation.id)),
             groupSettings:
               conversation.type === "group"
                 ? parseGroupSettings(
@@ -1544,6 +1799,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
                     currentUser.id,
                     toMessageStatus,
                     e2eDecryptCache[conversation.lastMessage.id],
+                    e2eDecryptFailed[conversation.lastMessage.id],
                   )
                 : undefined,
           };
@@ -1552,7 +1808,14 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
       return INITIAL_CHATS;
     },
-    [conversationSummaries, currentUser, e2eDecryptCache, isAuthenticated],
+    [
+      conversationSummaries,
+      currentUser,
+      e2eDecryptCache,
+      e2eDecryptFailed,
+      isAuthenticated,
+      localMutedConversationIds,
+    ],
   );
 
   const messages = useMemo<Record<string, GMessage[]>>(() => {
@@ -1565,74 +1828,130 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       if (!page || !currentUser) continue;
       const chatId = knownConversationIds[index];
       if (!chatId) continue;
-      record[chatId] = page.messages.map((message) =>
-        toGMessage(message, currentUser.id, toMessageStatus, e2eDecryptCache[message.id]),
-      );
+      record[chatId] = page.messages
+        .filter(
+          (message) =>
+            !isPendingE2eDecrypt(message, e2eDecryptCache[message.id], e2eDecryptFailed[message.id]),
+        )
+        .map((message) =>
+          toGMessage(
+            message,
+            currentUser.id,
+            toMessageStatus,
+            e2eDecryptCache[message.id],
+            e2eDecryptFailed[message.id],
+          ),
+        );
     }
 
     for (const item of outbox) {
+      const extracted =
+        item.type === "text"
+          ? extractReplyFromContent(item.content)
+          : { body: item.content, replyTo: null };
       record[item.chatId] = [
         ...(record[item.chatId] ?? []),
         {
           id: item.localId,
           chatId: item.chatId,
           senderId: currentUserId,
-          content: item.content,
+          content:
+            item.type === "text"
+              ? getMessageDisplayContent(extracted.body).displayContent
+              : item.content,
           type: item.type,
-        status: item.status,
+          status: item.status,
           timestamp: item.createdAt,
+          replyTo: item.replyTo ?? extracted.replyTo ?? undefined,
+          reactions: [],
         },
       ];
       record[item.chatId] = sortGMessages(record[item.chatId] ?? []);
     }
 
     return record;
-  }, [currentUser, currentUserId, e2eDecryptCache, isAuthenticated, knownConversationIds, messageQueries, outbox]);
+  }, [
+    currentUser,
+    currentUserId,
+    e2eDecryptCache,
+    e2eDecryptFailed,
+    isAuthenticated,
+    knownConversationIds,
+    messageQueries,
+    outbox,
+  ]);
 
   useEffect(() => {
-    if (!isE2eEnabled() || !currentUser?.id) return;
+    if (!isE2eEnabled() || !currentUser?.id || !e2eReady) return;
 
-    const pending: Array<{
+    const pendingById = new Map<
+      string,
+      {
+        id: string;
+        content: string;
+        senderId: string;
+        conversationId: string;
+        createdAt: string;
+      }
+    >();
+    const selfEncryptedIds: string[] = [];
+
+    const collect = (message: {
       id: string;
       content: string;
       senderId: string;
       conversationId: string;
-    }> = [];
+      createdAt: string;
+    }) => {
+      if (!isE2ePayload(message.content)) return;
+      if (e2eDecryptCacheRef.current[message.id]) return;
+      if (e2eDecryptFailedRef.current[message.id]) return;
+      if (message.senderId === currentUser.id) {
+        selfEncryptedIds.push(message.id);
+        return;
+      }
+      if (e2eDecryptInflightRef.current.has(message.id)) return;
+      pendingById.set(message.id, message);
+    };
 
     for (const conversation of conversationSummaries) {
       const lastMessage = conversation.lastMessage;
-      if (!lastMessage || !isE2ePayload(lastMessage.content)) continue;
-      if (e2eDecryptCacheRef.current[lastMessage.id]) continue;
-      if (e2eDecryptInflightRef.current.has(lastMessage.id)) continue;
-      pending.push({
-        id: lastMessage.id,
-        content: lastMessage.content,
-        senderId: lastMessage.senderId,
-        conversationId: conversation.id,
-      });
+      if (!lastMessage) continue;
+      collect({ ...lastMessage, conversationId: conversation.id });
     }
 
     for (const query of messageQueries) {
       const page = query.data;
       if (!page) continue;
       for (const message of page.messages) {
-        if (!isE2ePayload(message.content)) continue;
-        if (e2eDecryptCacheRef.current[message.id]) continue;
-        if (e2eDecryptInflightRef.current.has(message.id)) continue;
-        pending.push({
-          id: message.id,
-          content: message.content,
-          senderId: message.senderId,
-          conversationId: message.conversationId,
-        });
+        collect(message);
       }
     }
 
-    if (!pending.length) return;
+    if (selfEncryptedIds.length) {
+      setE2eDecryptFailed((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const messageId of selfEncryptedIds) {
+          if (next[messageId]) continue;
+          next[messageId] = true;
+          e2eDecryptFailedRef.current[messageId] = true;
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }
+
+    if (!pendingById.size) return;
+
+    // Ordre chronologique : l'enveloppe « init » qui établit la session
+    // doit être déchiffrée avant les messages « msg » qui en dépendent.
+    const pending = [...pendingById.values()].sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    );
 
     let cancelled = false;
     void (async () => {
-      const updates: Record<string, string> = {};
       for (const item of pending) {
         if (cancelled) break;
         e2eDecryptInflightRef.current.add(item.id);
@@ -1643,24 +1962,46 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             currentUser.id,
             conversationById,
           );
-          updates[item.id] = await tryDecryptDirectTextMessage(
+          if (!sessionPeerUserId) {
+            continue;
+          }
+          const result = await tryDecryptDirectTextMessage(
             currentUser.id,
             sessionPeerUserId,
             item.content,
           );
+          if (result === E2E_FALLBACK_LABEL) {
+            if (__DEV__ && !e2eDecryptWarnedRef.current.has(item.id)) {
+              e2eDecryptWarnedRef.current.add(item.id);
+              console.warn("[Gbairai] E2E: message indéchiffrable, affichage de secours", {
+                messageId: item.id,
+                sessionPeerUserId,
+              });
+            }
+            e2eDecryptFailedRef.current = {
+              ...e2eDecryptFailedRef.current,
+              [item.id]: true,
+            };
+            setE2eDecryptFailed((prev) => (prev[item.id] ? prev : { ...prev, [item.id]: true }));
+            continue;
+          }
+          persistE2ePlaintextCache({ [item.id]: result });
         } finally {
           e2eDecryptInflightRef.current.delete(item.id);
         }
-      }
-      if (!cancelled && Object.keys(updates).length > 0) {
-        setE2eDecryptCache((prev) => ({ ...prev, ...updates }));
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [conversationById, conversationSummaries, currentUser?.id, messageQueries]);
+  }, [
+    conversationById,
+    conversationSummaries,
+    currentUser?.id,
+    e2eReady,
+    messageQueries,
+  ]);
 
   const maybeEncryptTextPayload = useCallback(
     async (chatId: string, content: string, messageType: string) => {
@@ -1683,20 +2024,28 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     [conversationById, currentUser?.id],
   );
 
-  const sendMessage = (chatId: string, content: string) => {
+  const sendMessage = (
+    chatId: string,
+    content: string,
+    options?: { replyTo?: MessageReplyRef },
+  ) => {
+    const serialized = options?.replyTo
+      ? encodeTextMessageContent(content, options.replyTo)
+      : content;
     const payload = {
       localId: `local_${Date.now()}`,
       chatId,
-      content,
+      content: serialized,
       type: "text" as const,
       createdAt: new Date().toISOString(),
       status: "sending" as const,
+      replyTo: options?.replyTo,
     };
 
     const sendNow = async () => {
       setOutbox((prev) => [...prev, payload]);
       try {
-        const wireContent = await maybeEncryptTextPayload(chatId, content, "text");
+        const wireContent = await maybeEncryptTextPayload(chatId, serialized, "text");
         const sentMessage = await sendConversationMessage(chatId, {
           content: wireContent,
           type: "text",
@@ -1706,7 +2055,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           nextCursor: current?.nextCursor ?? null,
         }));
         if (isE2ePayload(wireContent)) {
-          setE2eDecryptCache((prev) => ({ ...prev, [sentMessage.id]: content }));
+          persistE2ePlaintextCache({ [sentMessage.id]: serialized });
         }
         setOutbox((prev) => prev.filter((item) => item.localId !== payload.localId));
       } catch {
@@ -1854,6 +2203,86 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     void sendNow();
   };
 
+  const reactToMessage = async (chatId: string, messageId: string, emoji: string) => {
+    if (!authToken || !currentUser?.id) {
+      throw new Error("Session expirée");
+    }
+    if (messageId.startsWith("local_")) {
+      throw new Error("Attendez que le message soit envoyé avant d'ajouter une réaction.");
+    }
+
+    const previousPage = queryClient.getQueryData<MessagesPage>(["messages", chatId]);
+    const target = previousPage?.messages.find((message) => message.id === messageId) as
+      | (ConversationMessage & { reactions?: MessageReactionSummary[] })
+      | undefined;
+    const currentReactions = target?.reactions ?? [];
+    const myReaction = currentReactions.find((reaction) => reaction.reactedByMe);
+    const nextEmoji = myReaction?.emoji === emoji ? null : emoji;
+
+    const optimisticReactions = (() => {
+      const list = currentReactions.map((reaction) => ({
+        ...reaction,
+        userIds: [...reaction.userIds],
+      }));
+
+      if (myReaction) {
+        const prevIndex = list.findIndex((reaction) => reaction.emoji === myReaction.emoji);
+        if (prevIndex >= 0) {
+          const entry = list[prevIndex]!;
+          entry.userIds = entry.userIds.filter((userId) => userId !== currentUser.id);
+          entry.count = entry.userIds.length;
+          entry.reactedByMe = false;
+          if (entry.count === 0) {
+            list.splice(prevIndex, 1);
+          }
+        }
+      }
+
+      if (nextEmoji) {
+        const nextIndex = list.findIndex((reaction) => reaction.emoji === nextEmoji);
+        if (nextIndex >= 0) {
+          const entry = list[nextIndex]!;
+          entry.userIds = [...entry.userIds, currentUser.id];
+          entry.count = entry.userIds.length;
+          entry.reactedByMe = true;
+        } else {
+          list.push({
+            emoji: nextEmoji,
+            count: 1,
+            userIds: [currentUser.id],
+            reactedByMe: true,
+          });
+        }
+      }
+
+      return list;
+    })();
+
+    queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
+      messages: (current?.messages ?? []).map((message) =>
+        message.id === messageId ? { ...message, reactions: optimisticReactions } : message,
+      ),
+      nextCursor: current?.nextCursor ?? null,
+    }));
+
+    try {
+      const result = await setMessageReaction(messageId, nextEmoji);
+      if (result.reactions) {
+        queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
+          messages: (current?.messages ?? []).map((message) =>
+            message.id === messageId ? { ...message, reactions: result.reactions } : message,
+          ),
+          nextCursor: current?.nextCursor ?? null,
+        }));
+      }
+    } catch (error) {
+      if (previousPage) {
+        queryClient.setQueryData(["messages", chatId], previousPage);
+      }
+      throw error;
+    }
+  };
+
   const deleteMessage = async (chatId: string, messageId: string) => {
     const previousMessages = queryClient.getQueryData<MessagesPage>(["messages", chatId]);
     const tombstoneContent = encodeDeletedMessageContent();
@@ -1902,7 +2331,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     }));
 
     try {
-      const wireContent = await maybeEncryptTextPayload(chatId, trimmed, "text");
+      const wireContent = await maybeEncryptTextPayload(chatId, editedContent, "text");
       const updatedMessage = await customFetch<ConversationMessage>(`/api/messages/${messageId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -1913,7 +2342,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         nextCursor: current?.nextCursor ?? null,
       }));
       if (isE2ePayload(wireContent)) {
-        setE2eDecryptCache((prev) => ({ ...prev, [updatedMessage.id]: trimmed }));
+        persistE2ePlaintextCache({ [updatedMessage.id]: editedContent });
       }
       queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
         conversations: updateConversationSummaryWithEditedMessage(
@@ -2117,7 +2546,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             mimeType,
           });
           setPhase("uploading");
-          await uploadFileToSignedUrl(target.uploadUrl, mediaUri, mimeType);
+          await uploadFileToSignedUrl(target.uploadUrl, mediaUri, mimeType, draft.mediaAssetId);
           setPhase("finalizing");
           return {
             url: getDisplayMediaUrl(target.key, target.publicUrl),
@@ -2131,6 +2560,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           mediaUri,
           mimeType,
           type: "video",
+          assetId: draft.mediaAssetId,
           onPhase: setPhase,
         });
       },
@@ -2311,16 +2741,20 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     const Contacts = await import("expo-contacts");
     const existingPermission = await Contacts.getPermissionsAsync();
 
-    if (existingPermission.status !== "granted") {
-      if (existingPermission.status === "denied" || existingPermission.canAskAgain === false) {
-        markContactsPermissionDenied();
-        return [];
-      }
+    if (existingPermission.status === "granted") {
+      resetContactsPermissionState();
+    } else if (existingPermission.canAskAgain === false) {
+      markContactsPermissionDenied();
+      return [];
+    } else {
       const permission = await Contacts.requestPermissionsAsync();
       if (permission.status !== "granted") {
-        markContactsPermissionDenied();
+        if (permission.canAskAgain === false) {
+          markContactsPermissionDenied();
+        }
         return [];
       }
+      resetContactsPermissionState();
     }
 
     const allContacts: ExpoContacts.Contact[] = [];
@@ -2382,8 +2816,17 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     async (options?: { force?: boolean }) => {
       const force = options?.force ?? false;
 
-      if (!force && composeContactsRef.current.length > 0 && isContactsSyncFresh()) {
+      if (
+        !force &&
+        !isContactsPermissionDenied() &&
+        composeContactsRef.current.length > 0 &&
+        isContactsSyncFresh()
+      ) {
         return composeContactsRef.current;
+      }
+
+      if (force) {
+        resetContactsPermissionState();
       }
 
       const importedContacts = await runContactsSyncOnce(() => syncPhoneContacts());
@@ -2638,6 +3081,63 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     }));
   };
 
+  const muteConversation = async (chatId: string, muted = true) => {
+    setLocalMutedConversationIds((prev) => {
+      if (muted) {
+        return prev.includes(chatId) ? prev : [...prev, chatId];
+      }
+      return prev.filter((id) => id !== chatId);
+    });
+    queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+      conversations: (current?.conversations ?? []).map((conversation) =>
+        conversation.id === chatId ? { ...conversation, isMuted: muted } : conversation,
+      ),
+    }));
+
+    try {
+      const updatedConversation = await customFetch<ExtendedConversationSummary>(
+        `/api/conversations/${chatId}/mute`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ muted }),
+        },
+      );
+      queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+        conversations: upsertConversationSummary(
+          current?.conversations ?? [],
+          updatedConversation,
+        ),
+      }));
+    } catch (error) {
+      if (isHttpNotFound(error)) {
+        return;
+      }
+      setLocalMutedConversationIds((prev) => {
+        if (!muted) {
+          return prev.includes(chatId) ? prev : [...prev, chatId];
+        }
+        return prev.filter((id) => id !== chatId);
+      });
+      queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+        conversations: (current?.conversations ?? []).map((conversation) =>
+          conversation.id === chatId ? { ...conversation, isMuted: !muted } : conversation,
+        ),
+      }));
+      throw error;
+    }
+  };
+
+  const deleteConversation = async (chatId: string) => {
+    await customFetch<{ success: boolean }>(`/api/conversations/${chatId}`, {
+      method: "DELETE",
+    });
+    queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+      conversations: (current?.conversations ?? []).filter((conversation) => conversation.id !== chatId),
+    }));
+    queryClient.removeQueries({ queryKey: ["messages", chatId] });
+  };
+
   const hasConversationData = conversationsQuery.data !== undefined;
   const isLoadingChats =
     isAuthenticated &&
@@ -2659,11 +3159,14 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         unblockUser,
         isUserBlocked,
         archiveConversation,
+        muteConversation,
+        deleteConversation,
         stories,
         isLoadingChats,
         socketConnected,
         typingByConversation,
         sendMessage,
+        reactToMessage,
         sendEmoji3dMessage,
         sendAudioMessage,
         sendImageMessage,
@@ -2699,6 +3202,11 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         leaveConversationRealtime,
       }}
     >
+      <MessageSoundsBridge
+        enabled={currentUser?.settings.notificationSoundEnabled ?? true}
+        listPlayRef={playConversationListSoundRef}
+        chatPlayRef={playChatIncomingSoundRef}
+      />
       {children}
     </ChatsReactContext.Provider>
   );

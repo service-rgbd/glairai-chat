@@ -25,6 +25,8 @@ import { ConversationSearchModal } from "@/components/ConversationSearchModal";
 import { MessageActionsModal } from "@/components/MessageActionsModal";
 import { MessageBubble } from "@/components/MessageBubble";
 import { MessageEditModal } from "@/components/MessageEditModal";
+import { MessageReactionPicker } from "@/components/MessageReactionPicker";
+import { SwipeableMessageRow } from "@/components/SwipeableMessageRow";
 import { useAuth } from "@/contexts/AuthContext";
 import type { GMessage } from "@/contexts/chats-types";
 import { formatHistorySectionLabel, formatTimestamp, getHistoryDateKey } from "@/lib/format-timestamp";
@@ -41,6 +43,7 @@ import {
   getDeleteMessageTitle,
   getMessageActionAvailability,
 } from "@/lib/message-actions";
+import { buildMessageReplyRef, type MessageReplyRef } from "@/lib/message-reply";
 
 const HEADER_BODY_HEIGHT = 62;
 
@@ -55,6 +58,7 @@ export default function ChatScreen() {
     messages,
     users,
     sendMessage,
+    reactToMessage,
     sendEmoji3dMessage,
     sendAudioMessage,
     sendImageMessage,
@@ -89,6 +93,8 @@ export default function ChatScreen() {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [groupCallPickerOpen, setGroupCallPickerOpen] = useState(false);
   const [pendingGroupCallType, setPendingGroupCallType] = useState<"audio" | "video">("audio");
+  const [replyingTo, setReplyingTo] = useState<MessageReplyRef | null>(null);
+  const [reactionPickerMessage, setReactionPickerMessage] = useState<GMessage | null>(null);
 
   const chat = chats.find((c) => c.id === id);
   const chatMessages = messages[id ?? ""] ?? [];
@@ -210,8 +216,31 @@ export default function ChatScreen() {
 
   const handleSend = (text: string) => {
     if (!id) return;
-    sendMessage(id, text);
+    sendMessage(id, text, replyingTo ? { replyTo: replyingTo } : undefined);
+    setReplyingTo(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const getMessageSenderName = (message: GMessage) => {
+    if (message.senderId === currentUserId) {
+      return currentUser?.name ?? "Vous";
+    }
+    return users[message.senderId]?.name ?? "Contact";
+  };
+
+  const startReplyToMessage = (message: GMessage) => {
+    if (message.isDeleted) return;
+    setReplyingTo(buildMessageReplyRef(message, getMessageSenderName(message)));
+  };
+
+  const handleMessageReaction = (message: GMessage, emoji: string) => {
+    if (!id || message.isDeleted) return;
+    void reactToMessage(id, message.id, emoji).catch((error) => {
+      Alert.alert(
+        "Réaction impossible",
+        error instanceof Error ? error.message : "Impossible d'ajouter cette réaction.",
+      );
+    });
   };
 
   const groupMembers = isGroup
@@ -387,9 +416,16 @@ export default function ChatScreen() {
     : { canEdit: false, canDelete: false, isWithinWindow: false };
 
   const handleMessageLongPress = (message: GMessage) => {
-    const availability = getMessageActionAvailability(message, currentUserId);
+    if (message.isDeleted) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setReactionPickerMessage(message);
+  };
+
+  const openMessageActionsFromPicker = () => {
+    if (!reactionPickerMessage) return;
+    const availability = getMessageActionAvailability(reactionPickerMessage, currentUserId);
     if (!availability.canEdit && !availability.canDelete) {
-      if (message.senderId === currentUserId && !availability.isWithinWindow) {
+      if (reactionPickerMessage.senderId === currentUserId && !availability.isWithinWindow) {
         Alert.alert(
           "Action impossible",
           "Vous ne pouvez modifier ou supprimer un message que dans les 15 minutes suivant l'envoi.",
@@ -397,9 +433,8 @@ export default function ChatScreen() {
       }
       return;
     }
-
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setSelectedMessage(message);
+    setSelectedMessage(reactionPickerMessage);
+    setReactionPickerMessage(null);
     setShowActionsModal(true);
   };
 
@@ -464,7 +499,6 @@ export default function ChatScreen() {
     const isMe = item.senderId === currentUserId;
     const isLast = index === 0;
     const sender = !isMe ? users[item.senderId] : undefined;
-    const availability = getMessageActionAvailability(item, currentUserId);
     const reversedMessages = [...chatMessages].reverse();
     const showDateSeparator =
       index === reversedMessages.length - 1 ||
@@ -498,19 +532,21 @@ export default function ChatScreen() {
           </View>
         ) : null}
         <AnimatedIncomingMessage animate={!isMe && incomingAnimatedIds.has(item.id)}>
-          <MessageBubble
-            message={item}
-            isMe={isMe}
-            showSenderName={isGroup && !isMe}
-            sender={sender}
-            profileUser={profileUser}
-            isLast={isLast}
-            onLongPress={
-              availability.canEdit || availability.canDelete
-                ? () => handleMessageLongPress(item)
-                : undefined
-            }
-          />
+          <SwipeableMessageRow
+            enabled={!item.isDeleted && !isBlockedContact}
+            onReply={() => startReplyToMessage(item)}
+          >
+            <MessageBubble
+              message={item}
+              isMe={isMe}
+              showSenderName={isGroup && !isMe}
+              sender={sender}
+              profileUser={profileUser}
+              isLast={isLast}
+              onLongPress={() => handleMessageLongPress(item)}
+              onReactionPress={(emoji) => handleMessageReaction(item, emoji)}
+            />
+          </SwipeableMessageRow>
         </AnimatedIncomingMessage>
       </View>
     );
@@ -658,6 +694,8 @@ export default function ChatScreen() {
             conversationId={id}
             allowMedia={canSendGroupMedia}
             autoStartVoiceRecording={recordVoice === "1"}
+            replyTo={replyingTo}
+            onClearReply={() => setReplyingTo(null)}
             onSend={handleSend}
             onSendEmoji3d={handleSendEmoji3d}
             onSendAudio={(payload) => {
@@ -681,6 +719,27 @@ export default function ChatScreen() {
           ) : null}
         </KeyboardAvoidingView>
       </View>
+
+      <MessageReactionPicker
+        visible={Boolean(reactionPickerMessage)}
+        message={reactionPickerMessage}
+        onClose={() => setReactionPickerMessage(null)}
+        onSelectEmoji={(emoji) => {
+          if (!reactionPickerMessage) return;
+          handleMessageReaction(reactionPickerMessage, emoji);
+        }}
+        onReply={() => {
+          if (!reactionPickerMessage) return;
+          startReplyToMessage(reactionPickerMessage);
+        }}
+        onMoreOptions={
+          reactionPickerMessage &&
+          (getMessageActionAvailability(reactionPickerMessage, currentUserId).canEdit ||
+            getMessageActionAvailability(reactionPickerMessage, currentUserId).canDelete)
+            ? openMessageActionsFromPicker
+            : undefined
+        }
+      />
 
       <MessageActionsModal
         visible={showActionsModal}

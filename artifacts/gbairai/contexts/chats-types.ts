@@ -1,5 +1,7 @@
 import type { ContactMatch, GroupInvite, GroupInvitePreview } from "@workspace/api-client-react";
 import type { GroupSettings } from "@/lib/group-settings";
+import type { MessageReactionSummary } from "@/lib/message-reactions";
+import type { MessageReplyRef } from "@/lib/message-reply";
 
 export interface GUser {
   id: string;
@@ -27,6 +29,8 @@ export interface GMessage {
   timestamp: string;
   editedAt?: string | null;
   isDeleted?: boolean;
+  replyTo?: MessageReplyRef;
+  reactions?: MessageReactionSummary[];
 }
 
 export interface GChat {
@@ -38,6 +42,7 @@ export interface GChat {
   createdBy?: string;
   unreadCount: number;
   isArchived?: boolean;
+  isMuted?: boolean;
   groupSettings?: GroupSettings;
   lastMessage?: GMessage;
 }
@@ -94,6 +99,7 @@ export interface StoryComposerDraft {
   text: string;
   mediaUri: string | null;
   mimeType: string | null;
+  mediaAssetId?: string | null;
   backgroundColor?: string;
   previewThumbnailUri?: string | null;
 }
@@ -116,11 +122,14 @@ export interface ChatsContextType {
   unblockUser: (userId: string) => Promise<void>;
   isUserBlocked: (userId: string) => boolean;
   archiveConversation: (chatId: string, archived?: boolean) => Promise<void>;
+  muteConversation: (chatId: string, muted?: boolean) => Promise<void>;
+  deleteConversation: (chatId: string) => Promise<void>;
   stories: GStory[];
   isLoadingChats: boolean;
   socketConnected: boolean;
   typingByConversation: Record<string, string[]>;
-  sendMessage: (chatId: string, content: string) => void;
+  sendMessage: (chatId: string, content: string, options?: { replyTo?: MessageReplyRef }) => void;
+  reactToMessage: (chatId: string, messageId: string, emoji: string) => Promise<void>;
   sendEmoji3dMessage: (
     chatId: string,
     payload: import("@/lib/emoji-messages").Emoji3dMessagePayload,

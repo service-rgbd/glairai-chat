@@ -17,6 +17,7 @@ import {
   groupInvitesTable,
   hasDatabase,
   messageReceiptsTable,
+  messageReactionsTable,
   messagesTable,
   otpCodesTable,
   sessionsTable,
@@ -94,6 +95,13 @@ export interface MessageReceipt {
   readAt: string | null;
 }
 
+export interface MessageReactionSummary {
+  emoji: string;
+  count: number;
+  userIds: string[];
+  reactedByMe: boolean;
+}
+
 export interface ConversationMessage {
   id: string;
   conversationId: string;
@@ -102,6 +110,7 @@ export interface ConversationMessage {
   type: MessageType;
   createdAt: string;
   receipts: MessageReceipt[];
+  reactions?: MessageReactionSummary[];
 }
 
 export interface ConversationSummary {
@@ -135,6 +144,7 @@ export interface RealtimeEvent {
     | "message.created"
     | "message.deleted"
     | "message.updated"
+    | "message.reaction"
     | "message.receipt"
     | "presence.updated"
     | "conversation.created"
@@ -152,6 +162,7 @@ export interface RealtimeEvent {
   callId?: string;
   messageId?: string;
   message?: ConversationMessage;
+  reactions?: MessageReactionSummary[];
   receipt?: MessageReceipt;
   presence?: { userId: string; snapshot: PresenceSnapshot };
   conversation?: ConversationSummary;
@@ -2314,13 +2325,17 @@ class DatabaseChatService implements ChatService {
     const limit = params.limit ?? 50;
     const page = all.slice(startIndex, startIndex + limit);
     const nextCursor = startIndex + limit < all.length ? page.at(-1)?.id ?? null : null;
+    const reactionsMap = await this.getReactionsMapForMessages(
+      page.map((message) => message.id),
+      user.id,
+    );
 
     return {
       messages: await Promise.all(
         page
           .slice()
           .reverse()
-          .map((message) => this.toMessage(message.conversationId, message.id)),
+          .map((message) => this.toMessage(message.conversationId, message.id, user.id, reactionsMap)),
       ),
       nextCursor,
     };
@@ -3654,7 +3669,141 @@ class DatabaseChatService implements ChatService {
     };
   }
 
-  private async toMessage(conversationId: string, messageId: string): Promise<ConversationMessage> {
+  private summarizeMessageReactions(
+    rows: Array<{ emoji: string; userId: string }>,
+    viewerUserId: string,
+  ): MessageReactionSummary[] {
+    const grouped = new Map<string, { count: number; userIds: string[] }>();
+    for (const row of rows) {
+      const current = grouped.get(row.emoji) ?? { count: 0, userIds: [] };
+      current.count += 1;
+      current.userIds.push(row.userId);
+      grouped.set(row.emoji, current);
+    }
+
+    return [...grouped.entries()]
+      .map(([emoji, value]) => ({
+        emoji,
+        count: value.count,
+        userIds: value.userIds,
+        reactedByMe: value.userIds.includes(viewerUserId),
+      }))
+      .sort((left, right) => right.count - left.count || left.emoji.localeCompare(right.emoji));
+  }
+
+  private async getReactionsMapForMessages(messageIds: string[], viewerUserId: string) {
+    const map = new Map<string, MessageReactionSummary[]>();
+    if (!messageIds.length || !db) return map;
+
+    const rows = await db
+      .select({
+        messageId: messageReactionsTable.messageId,
+        emoji: messageReactionsTable.emoji,
+        userId: messageReactionsTable.userId,
+      })
+      .from(messageReactionsTable)
+      .where(inArray(messageReactionsTable.messageId, messageIds));
+
+    const groupedRows = new Map<string, Array<{ emoji: string; userId: string }>>();
+    for (const row of rows) {
+      const bucket = groupedRows.get(row.messageId) ?? [];
+      bucket.push({ emoji: row.emoji, userId: row.userId });
+      groupedRows.set(row.messageId, bucket);
+    }
+
+    for (const [messageId, reactionRows] of groupedRows.entries()) {
+      map.set(messageId, this.summarizeMessageReactions(reactionRows, viewerUserId));
+    }
+
+    return map;
+  }
+
+  async setMessageReaction(token: string, messageId: string, emoji: string | null) {
+    const user = await this.requireUserByToken(token);
+    const [message] = await db!
+      .select()
+      .from(messagesTable)
+      .where(eq(messagesTable.id, messageId))
+      .limit(1);
+
+    if (!message) {
+      throw new Error("Message introuvable");
+    }
+
+    await this.requireConversationMembership(message.conversationId, user.id);
+
+    if (emoji === null || emoji.trim() === "") {
+      await db!
+        .delete(messageReactionsTable)
+        .where(
+          and(
+            eq(messageReactionsTable.messageId, messageId),
+            eq(messageReactionsTable.userId, user.id),
+          ),
+        );
+    } else {
+      const normalizedEmoji = emoji.trim();
+      const [existing] = await db!
+        .select()
+        .from(messageReactionsTable)
+        .where(
+          and(
+            eq(messageReactionsTable.messageId, messageId),
+            eq(messageReactionsTable.userId, user.id),
+          ),
+        )
+        .limit(1);
+
+      if (existing?.emoji === normalizedEmoji) {
+        await db!
+          .delete(messageReactionsTable)
+          .where(
+            and(
+              eq(messageReactionsTable.messageId, messageId),
+              eq(messageReactionsTable.userId, user.id),
+            ),
+          );
+      } else if (existing) {
+        await db!
+          .update(messageReactionsTable)
+          .set({ emoji: normalizedEmoji, createdAt: new Date() })
+          .where(
+            and(
+              eq(messageReactionsTable.messageId, messageId),
+              eq(messageReactionsTable.userId, user.id),
+            ),
+          );
+      } else {
+        await db!.insert(messageReactionsTable).values({
+          messageId,
+          userId: user.id,
+          emoji: normalizedEmoji,
+          createdAt: new Date(),
+        });
+      }
+    }
+
+    const reactionsMap = await this.getReactionsMapForMessages([messageId], user.id);
+    const reactions = reactionsMap.get(messageId) ?? [];
+    const participantIds = await this.getConversationParticipantIds(message.conversationId);
+
+    this.publish({
+      type: "message.reaction",
+      participantIds,
+      conversationId: message.conversationId,
+      messageId,
+      reactions,
+    });
+
+    return { messageId, reactions };
+  }
+
+  private async toMessage(
+    conversationId: string,
+    messageId: string,
+    viewerUserId?: string,
+    reactionsMap?: Map<string, MessageReactionSummary[]>,
+  ): Promise<ConversationMessage> {
     const [message] = await db!
       .select()
       .from(messagesTable)
@@ -3689,6 +3838,11 @@ class DatabaseChatService implements ChatService {
         deliveredAt: toIso(receipt.deliveredAt),
         readAt: toIso(receipt.readAt),
       })),
+      reactions:
+        reactionsMap?.get(message.id) ??
+        (viewerUserId
+          ? (await this.getReactionsMapForMessages([message.id], viewerUserId)).get(message.id)
+          : undefined),
     };
   }
 

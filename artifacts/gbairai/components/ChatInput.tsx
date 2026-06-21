@@ -32,6 +32,7 @@ import {
   createMediaUploadTarget,
   generateVideoThumbnailUri,
   getDisplayMediaUrl,
+  prepareLocalMediaUriForUpload,
   uploadAudioToSignedUrl,
   uploadChatVideoWithThumbnail,
   uploadFileToSignedUrl,
@@ -39,6 +40,7 @@ import {
 import { runWithUploadStatus, type UploadStatus } from "@/lib/upload-status";
 import { getEmoji3dPayloadFromContent, type Emoji3dMessagePayload } from "@/lib/emoji-messages";
 import { getChatEmoji3dImageUrl } from "@/lib/story-reactions";
+import type { MessageReplyRef } from "@/lib/message-reply";
 
 const PREVIEW_WAVEFORM_BARS = [
   0.28, 0.62, 0.44, 0.86, 0.52, 0.74, 0.38, 0.68, 0.56, 0.42, 0.78, 0.48, 0.66, 0.34, 0.58,
@@ -156,6 +158,8 @@ interface ChatInputProps {
   conversationId?: string;
   autoStartVoiceRecording?: boolean;
   allowMedia?: boolean;
+  replyTo?: MessageReplyRef | null;
+  onClearReply?: () => void;
 }
 
 export function ChatInput({
@@ -169,6 +173,8 @@ export function ChatInput({
   conversationId,
   autoStartVoiceRecording = false,
   allowMedia = true,
+  replyTo = null,
+  onClearReply,
 }: ChatInputProps) {
   const colors = useColors();
   const { authToken } = useAuth();
@@ -192,6 +198,7 @@ export function ChatInput({
     mimeType: string;
     thumbnailUri: string;
     durationSeconds?: number;
+    assetId?: string | null;
   } | null>(null);
   const [isPreparingPreview, setIsPreparingPreview] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
@@ -235,6 +242,8 @@ export function ChatInput({
       uploadChatVideoWithThumbnail(authToken, {
         videoUri: video.uri,
         videoMimeType: video.mimeType,
+        thumbnailUri: video.thumbnailUri,
+        assetId: video.assetId,
         conversationId,
         onPhase: setPhase,
       }),
@@ -265,6 +274,8 @@ export function ChatInput({
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images", "videos"],
       quality: 0.8,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     });
 
     if (result.canceled) return;
@@ -287,11 +298,17 @@ export function ChatInput({
     setAudioError(null);
     setIsPreparingPreview(true);
     try {
-      const thumbnailUri = await generateVideoThumbnailUri(asset.uri);
+      const preparedUri = await prepareLocalMediaUriForUpload(
+        asset.uri,
+        mimeType,
+        asset.assetId,
+      );
+      const thumbnailUri = await generateVideoThumbnailUri(preparedUri);
       setPendingVideo({
-        uri: asset.uri,
+        uri: preparedUri,
         mimeType,
         thumbnailUri,
+        assetId: asset.assetId,
         durationSeconds: asset.duration ? Math.round(asset.duration / 1000) : undefined,
       });
     } catch (error) {
@@ -437,6 +454,26 @@ export function ChatInput({
   return (
     <>
       <View style={[styles.container, { paddingBottom: bottomInset + 10 }]}>
+        {replyTo ? (
+          <View style={[styles.replyBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.replyBannerAccent, { backgroundColor: colors.primary }]} />
+            <View style={styles.replyBannerBody}>
+              <Text style={[styles.replyBannerTitle, { color: colors.primary }]} numberOfLines={1}>
+                {replyTo.senderName}
+              </Text>
+              <Text style={[styles.replyBannerPreview, { color: colors.mutedForeground }]} numberOfLines={1}>
+                {replyTo.preview}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={onClearReply}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="close" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
         {uploadStatus ? (
           <View style={styles.uploadBannerWrap}>
             <UploadProgressBanner status={uploadStatus} />
@@ -866,6 +903,32 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     gap: 8,
     backgroundColor: "transparent",
+  },
+  replyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  replyBannerAccent: {
+    width: 3,
+    alignSelf: "stretch",
+    borderRadius: 2,
+  },
+  replyBannerBody: {
+    flex: 1,
+    gap: 2,
+  },
+  replyBannerTitle: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
+  replyBannerPreview: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
   },
   uploadBannerWrap: {
     width: "100%",

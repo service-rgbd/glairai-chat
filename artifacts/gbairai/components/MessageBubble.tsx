@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import type { GMessage, GUser } from "@/contexts/chats-types";
+import { LinkableText } from "@/components/LinkableText";
 import { VoiceNoteBubble } from "@/components/VoiceNoteBubble";
 import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { useChatFontScale } from "@/hooks/useChatFontScale";
@@ -31,6 +32,7 @@ interface MessageBubbleProps {
   profileUser?: Pick<GUser, "avatar" | "initials" | "color">;
   isLast?: boolean;
   onLongPress?: () => void;
+  onReactionPress?: (emoji: string) => void;
 }
 
 export function MessageBubble({
@@ -41,6 +43,7 @@ export function MessageBubble({
   profileUser,
   isLast,
   onLongPress,
+  onReactionPress,
 }: MessageBubbleProps) {
   const colors = useColors();
   const { messageFontSize, metaFontSize } = useChatFontScale();
@@ -65,6 +68,7 @@ export function MessageBubble({
       : null;
   const cachedImageUrl = useCachedMediaUrl(resolvedImageUrl);
   const cachedVideoThumbnailUrl = useCachedMediaUrl(resolvedVideoThumbnailUrl);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
   const time = new Date(message.timestamp).toLocaleTimeString("fr-FR", {
     hour: "2-digit",
@@ -73,6 +77,68 @@ export function MessageBubble({
   const isMediaMessage = Boolean(imagePayload || videoPayload);
   const isAudioMessage = Boolean(audioPayload);
   const hideDefaultMeta = isMediaMessage || isAudioMessage;
+  const replyAccentColor = isMe ? "rgba(255,255,255,0.92)" : colors.primary;
+  const visibleReactions = Array.isArray(message.reactions)
+    ? message.reactions.filter((reaction) => reaction.count > 0)
+    : [];
+
+  const renderReplyQuote = () => {
+    if (!message.replyTo || isDeletedMessage) return null;
+    return (
+      <View
+        style={[
+          styles.replyQuote,
+          {
+            borderLeftColor: replyAccentColor,
+            backgroundColor: isMe ? "rgba(255,255,255,0.12)" : colors.background,
+          },
+        ]}
+      >
+        <Text style={[styles.replySender, { color: replyAccentColor }]} numberOfLines={1}>
+          {message.replyTo.senderName}
+        </Text>
+        <Text
+          style={[
+            styles.replyPreview,
+            { color: isMe ? "rgba(255,255,255,0.82)" : colors.mutedForeground },
+          ]}
+          numberOfLines={2}
+        >
+          {message.replyTo.preview}
+        </Text>
+      </View>
+    );
+  };
+
+  const renderReactions = () => {
+    if (!visibleReactions.length) return null;
+    return (
+      <View style={[styles.reactionsRow, isMe ? styles.reactionsRowMe : styles.reactionsRowOther]}>
+        {visibleReactions.map((reaction) => (
+          <TouchableOpacity
+            key={reaction.emoji}
+            style={[
+              styles.reactionPill,
+              {
+                backgroundColor: colors.card,
+                borderColor: reaction.reactedByMe ? colors.primary : colors.border,
+              },
+            ]}
+            onPress={() => onReactionPress?.(reaction.emoji)}
+            activeOpacity={0.8}
+            disabled={!onReactionPress}
+          >
+            <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+            {reaction.count > 1 ? (
+              <Text style={[styles.reactionCount, { color: colors.mutedForeground }]}>
+                {reaction.count}
+              </Text>
+            ) : null}
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
 
   const StatusIcon = ({ light = false }: { light?: boolean }) => {
     if (!isMe || callPayload) return null;
@@ -169,6 +235,7 @@ export function MessageBubble({
         {showSenderName && sender && (
           <Text style={[styles.senderName, { color: sender.color }]}>{sender.name}</Text>
         )}
+        {renderReplyQuote()}
         {isDeletedMessage ? (
           <Text
             style={[
@@ -195,13 +262,39 @@ export function MessageBubble({
             style={styles.mediaWrap}
             onPress={() => openMediaViewer("image")}
             activeOpacity={0.86}
+            disabled={!resolvedImageUrl}
           >
-            <Image
-              source={{ uri: cachedImageUrl ?? "" }}
-              style={styles.imageMedia}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
+            {resolvedImageUrl && !imageLoadFailed ? (
+              <Image
+                source={{ uri: cachedImageUrl ?? resolvedImageUrl }}
+                style={styles.imageMedia}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                onError={() => setImageLoadFailed(true)}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.imageMedia,
+                  styles.imageMediaFallback,
+                  { backgroundColor: isMe ? "rgba(255,255,255,0.12)" : colors.background },
+                ]}
+              >
+                <Ionicons
+                  name="image-outline"
+                  size={36}
+                  color={isMe ? "rgba(255,255,255,0.85)" : colors.mutedForeground}
+                />
+                <Text
+                  style={[
+                    styles.imageFallbackText,
+                    { color: isMe ? "rgba(255,255,255,0.85)" : colors.mutedForeground },
+                  ]}
+                >
+                  Photo indisponible
+                </Text>
+              </View>
+            )}
             {renderMediaOverlay()}
           </TouchableOpacity>
         ) : videoPayload ? (
@@ -292,7 +385,7 @@ export function MessageBubble({
             />
           </View>
         ) : (
-          <Text
+          <LinkableText
             style={[
               styles.text,
               {
@@ -300,9 +393,12 @@ export function MessageBubble({
                 fontSize: messageFontSize,
               },
             ]}
+            linkStyle={{
+              color: isMe ? "#fff" : colors.primary,
+            }}
           >
             {message.content}
-          </Text>
+          </LinkableText>
         )}
         {getSendingLabel() ? (
           <Text
@@ -351,6 +447,7 @@ export function MessageBubble({
           </View>
         ) : null}
       </TouchableOpacity>
+      {renderReactions()}
     </View>
   );
 }
@@ -388,6 +485,52 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
     marginBottom: 2,
+  },
+  replyQuote: {
+    borderLeftWidth: 3,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 6,
+    gap: 2,
+  },
+  replySender: {
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  replyPreview: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+  reactionsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    marginTop: -2,
+    marginBottom: 2,
+    maxWidth: "78%",
+  },
+  reactionsRowMe: {
+    justifyContent: "flex-end",
+  },
+  reactionsRowOther: {
+    justifyContent: "flex-start",
+  },
+  reactionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  reactionEmoji: {
+    fontSize: 14,
+  },
+  reactionCount: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
   },
   text: {
     fontSize: 17,
@@ -437,6 +580,15 @@ const styles = StyleSheet.create({
     maxHeight: 320,
     aspectRatio: 0.78,
     borderRadius: 14,
+  },
+  imageMediaFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  imageFallbackText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
   videoThumbWrap: {
     width: 240,
