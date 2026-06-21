@@ -160,6 +160,7 @@ export interface RealtimeEvent {
     | "presence.updated"
     | "conversation.created"
     | "conversation.updated"
+    | "conversation.deleted"
     | "member.added"
     | "member.removed"
     | "group.member_invited"
@@ -4655,7 +4656,21 @@ class DatabaseChatService implements ChatService {
 
   async deleteConversationForUser(token: string, conversationId: string) {
     const user = await this.requireUserByToken(token);
-    await this.requireConversationMembership(conversationId, user.id);
+    const conversation = await this.requireConversationMembership(conversationId, user.id);
+
+    if (conversation.type === "group" && conversation.createdBy === user.id) {
+      const participantIds = await this.getConversationParticipantIds(conversationId);
+
+      await db!.delete(conversationsTable).where(eq(conversationsTable.id, conversationId));
+
+      this.publish({
+        type: "conversation.deleted",
+        participantIds,
+        conversationId,
+      });
+
+      return { success: true };
+    }
 
     await db!
       .update(conversationMembersTable)
