@@ -217,7 +217,9 @@ export const ListConversationsResponse = zod.object({
   "readAt": zod.coerce.date().nullable()
 }))
 }).optional(),
-  "lastReadMessageId": zod.string().nullable()
+  "lastReadMessageId": zod.string().nullable(),
+  "isArchived": zod.boolean().optional(),
+  "isMuted": zod.boolean().optional()
 }))
 })
 
@@ -288,7 +290,9 @@ export const CreateConversationResponse = zod.object({
   "readAt": zod.coerce.date().nullable()
 }))
 }).optional(),
-  "lastReadMessageId": zod.string().nullable()
+  "lastReadMessageId": zod.string().nullable(),
+  "isArchived": zod.boolean().optional(),
+  "isMuted": zod.boolean().optional()
 })
 
 
@@ -350,7 +354,9 @@ export const GetConversationResponse = zod.object({
   "readAt": zod.coerce.date().nullable()
 }))
 }).optional(),
-  "lastReadMessageId": zod.string().nullable()
+  "lastReadMessageId": zod.string().nullable(),
+  "isArchived": zod.boolean().optional(),
+  "isMuted": zod.boolean().optional()
 })
 
 
@@ -418,7 +424,9 @@ export const UpdateConversationResponse = zod.object({
   "readAt": zod.coerce.date().nullable()
 }))
 }).optional(),
-  "lastReadMessageId": zod.string().nullable()
+  "lastReadMessageId": zod.string().nullable(),
+  "isArchived": zod.boolean().optional(),
+  "isMuted": zod.boolean().optional()
 })
 
 
@@ -480,7 +488,9 @@ export const JoinGroupByInviteResponse = zod.object({
   "readAt": zod.coerce.date().nullable()
 }))
 }).optional(),
-  "lastReadMessageId": zod.string().nullable()
+  "lastReadMessageId": zod.string().nullable(),
+  "isArchived": zod.boolean().optional(),
+  "isMuted": zod.boolean().optional()
 })
 
 
@@ -547,7 +557,9 @@ export const AddConversationMembersResponse = zod.object({
   "readAt": zod.coerce.date().nullable()
 }))
 }).optional(),
-  "lastReadMessageId": zod.string().nullable()
+  "lastReadMessageId": zod.string().nullable(),
+  "isArchived": zod.boolean().optional(),
+  "isMuted": zod.boolean().optional()
 })
 
 
@@ -610,7 +622,9 @@ export const RemoveConversationMemberResponse = zod.object({
   "readAt": zod.coerce.date().nullable()
 }))
 }).optional(),
-  "lastReadMessageId": zod.string().nullable()
+  "lastReadMessageId": zod.string().nullable(),
+  "isArchived": zod.boolean().optional(),
+  "isMuted": zod.boolean().optional()
 })
 
 

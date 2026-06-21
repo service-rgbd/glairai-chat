@@ -32,19 +32,15 @@ export function CallSoundController({ phase, variant = "outgoing" }: Props) {
     if (phase === "ringing") {
       ringPlayer.seekTo(0);
       ringPlayer.play();
-      return;
-    }
-
-    if (phase === "connected") {
+    } else if (phase === "connected") {
       connect.seekTo(0);
       connect.play();
-      return;
-    }
-
-    if (phase === "ended") {
+    } else if (phase === "ended") {
       end.seekTo(0);
       end.play();
     }
+    // Ne pas appeler pause() au démontage : expo-audio libère l'objet natif
+    // avant le cleanup React → NativeSharedObjectNotFoundException.
   }, [phase, ringPlayer, connect, end]);
 
   return null;

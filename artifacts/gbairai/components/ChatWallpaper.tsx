@@ -2,10 +2,11 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
-  Image as RNImage,
+  ImageBackground,
   StyleSheet,
   useColorScheme,
   View,
+  type ImageSourcePropType,
   type ViewProps,
 } from "react-native";
 
@@ -30,9 +31,13 @@ export function ChatWallpaper({ wallpaperId, style, ...props }: ChatWallpaperPro
   if (wallpaper.source.kind === "image") {
     const source = isDark && wallpaper.source.dark ? wallpaper.source.dark : wallpaper.source.light;
     return (
-      <View style={[StyleSheet.absoluteFill, style]} pointerEvents="none" {...props}>
+      <View
+        style={[StyleSheet.absoluteFill, styles.wallpaperLayer, style]}
+        pointerEvents="none"
+        {...props}
+      >
         {wallpaper.source.tile ? (
-          <RNImage source={source} resizeMode="repeat" style={StyleSheet.absoluteFill} />
+          <TiledWallpaperImage source={source} />
         ) : (
           <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" contentPosition="center" />
         )}
@@ -46,7 +51,11 @@ export function ChatWallpaper({ wallpaperId, style, ...props }: ChatWallpaperPro
   const palette = isDark ? wallpaper.source.dark : wallpaper.source.light;
 
   return (
-    <View style={[StyleSheet.absoluteFill, style]} pointerEvents="none" {...props}>
+    <View
+      style={[StyleSheet.absoluteFill, styles.wallpaperLayer, style]}
+      pointerEvents="none"
+      {...props}
+    >
       <LinearGradient
         colors={[...palette.colors]}
         locations={palette.locations ? [...palette.locations] : undefined}
@@ -95,7 +104,7 @@ export function ChatWallpaperPreview({
     return (
       <View style={[styles.preview, { width: size, height: size, overflow: "hidden" }]}>
         {wallpaper.source.tile ? (
-          <RNImage source={source} resizeMode="repeat" style={StyleSheet.absoluteFill} />
+          <TiledWallpaperImage source={source} />
         ) : (
           <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" />
         )}
@@ -125,9 +134,16 @@ export function ChatWallpaperPreview({
 }
 
 const styles = StyleSheet.create({
+  wallpaperLayer: {
+    zIndex: 0,
+  },
   preview: {
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.12)",
   },
 });
+
+function TiledWallpaperImage({ source }: { source: ImageSourcePropType }) {
+  return <ImageBackground source={source} resizeMode="repeat" style={StyleSheet.absoluteFill} />;
+}

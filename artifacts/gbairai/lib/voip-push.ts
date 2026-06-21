@@ -110,6 +110,9 @@ export function prepareVoipPushListeners(onToken: VoipTokenHandler) {
     if (__DEV__) {
       console.log("[Gbairai] listeners VoIP PushKit prêts");
     }
+    if (isVoipJsRegisterEnabled()) {
+      setTimeout(() => requestVoipPushTokenAfterCallKit(), 250);
+    }
   } catch (error) {
     if (__DEV__) {
       console.warn("[Gbairai VoIP] addEventListener failed", error);

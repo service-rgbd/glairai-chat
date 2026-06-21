@@ -216,6 +216,13 @@ export default function ProfileScreen() {
             label="Vidéo"
             onPress={() => openCall("video")}
           />
+          {chat ? (
+            <ActionButton
+              icon={<Ionicons name="images-outline" size={22} color={colors.primary} />}
+              label="Médias"
+              onPress={() => router.push(`/chat-media/${chat.id}`)}
+            />
+          ) : null}
           <ActionButton
             icon={<Feather name="more-horizontal" size={22} color={colors.primary} />}
             label="Plus"
@@ -246,6 +253,22 @@ export default function ProfileScreen() {
             <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>Statut</Text>
             <Text style={[styles.infoValue, { color: colors.text }]}>{user.status}</Text>
           </View>
+          {chat ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: colors.border }]} />
+              <TouchableOpacity
+                style={styles.infoRow}
+                activeOpacity={0.8}
+                onPress={() => router.push(`/chat-media/${chat.id}`)}
+              >
+                <View style={styles.infoCopy}>
+                  <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>Médias</Text>
+                  <Text style={[styles.infoValue, { color: colors.text }]}>Photos et vidéos partagées</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </>
+          ) : null}
         </View>
 
         <View style={[styles.dangerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>

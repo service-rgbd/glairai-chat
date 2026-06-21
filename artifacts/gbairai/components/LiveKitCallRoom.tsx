@@ -48,6 +48,7 @@ type Props = {
   onReconnecting?: () => void;
   onReconnected?: () => void;
   onTokenRefreshed?: (token: string) => void;
+  hangupLabel?: string;
 };
 
 /**
@@ -177,6 +178,7 @@ function CallRoomBody({
   onReconnecting,
   onReconnected,
   onTokenRefreshed,
+  hangupLabel = "Raccrocher",
 }: Omit<Props, "serverUrl" | "token" | "onError">) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -440,6 +442,7 @@ function CallRoomBody({
           style={[styles.controlBtn, styles.hangupBtn]}
           onPress={onDisconnected}
           activeOpacity={0.8}
+          accessibilityLabel={hangupLabel}
         >
           <Ionicons name="call" size={24} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
         </TouchableOpacity>

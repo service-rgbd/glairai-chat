@@ -303,6 +303,11 @@ export default function ChatScreen() {
     });
   };
 
+  const openSharedMedia = () => {
+    if (!id) return;
+    router.push(`/chat-media/${id}`);
+  };
+
   const chatMenuOptions = [
     {
       key: "search",
@@ -314,10 +319,7 @@ export default function ChatScreen() {
       key: "media",
       label: "Médias partagés",
       icon: "images-outline" as const,
-      onPress: () => {
-        if (!id) return;
-        router.push(`/chat-media/${id}`);
-      },
+      onPress: openSharedMedia,
     },
     {
       key: "archive",

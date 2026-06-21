@@ -152,11 +152,16 @@ export function ChatItem({
               {getPreview()}
             </Text>
           </View>
-          {hasUnread && (
-            <View style={[styles.badge, { backgroundColor: colors.unreadBadge }]}>
-              <Text style={styles.badgeText}>{chat.unreadCount > 99 ? "99+" : chat.unreadCount}</Text>
-            </View>
-          )}
+          <View style={styles.trailingIndicators}>
+            {chat.isMuted ? (
+              <Ionicons name="notifications-off-outline" size={17} color={colors.mutedForeground} />
+            ) : null}
+            {hasUnread && (
+              <View style={[styles.badge, { backgroundColor: colors.unreadBadge }]}>
+                <Text style={styles.badgeText}>{chat.unreadCount > 99 ? "99+" : chat.unreadCount}</Text>
+              </View>
+            )}
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -214,6 +219,11 @@ const styles = StyleSheet.create({
   },
   previewBold: {
     fontFamily: "Inter_500Medium",
+  },
+  trailingIndicators: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   badge: {
     minWidth: 20,

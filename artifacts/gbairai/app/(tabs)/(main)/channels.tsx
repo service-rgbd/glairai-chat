@@ -17,13 +17,16 @@ import { ChannelListItem } from "@/modules/channels/components/ChannelListItem";
 import { ChannelPostCard } from "@/modules/channels/components/ChannelPostCard";
 import { ChannelSearchBar } from "@/modules/channels/components/ChannelSearchBar";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
-import type { Channel } from "@/modules/channels/types";
+import type { Channel, ChannelPost } from "@/modules/channels/types";
+import { useAuth } from "@/contexts/AuthContext";
+import { getDisplayMediaUrl } from "@/lib/media";
 import { useColors } from "@/hooks/useColors";
 
 export default function ChannelsListScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { currentUser } = useAuth();
   const {
     discoverySections,
     feedPosts,
@@ -65,6 +68,20 @@ export default function ChannelsListScreen() {
 
   const showFeed = useMemo(() => !search.trim() && feedPosts.length > 0, [feedPosts.length, search]);
 
+  const ownedChannels = useMemo(() => {
+    const byId = new Map<string, Channel>();
+    for (const section of discoverySections) {
+      for (const channel of section.channels) {
+        if (channel.role === "owner" || channel.ownerId === currentUser?.id) {
+          byId.set(channel.id, channel);
+        }
+      }
+    }
+    return Array.from(byId.values()).sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt),
+    );
+  }, [currentUser?.id, discoverySections]);
+
   const handleFollowToggle = async (channel: Channel) => {
     setFollowBusyId(channel.id);
     try {
@@ -86,6 +103,17 @@ export default function ChannelsListScreen() {
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const openPostMedia = (post: ChannelPost) => {
+    if (!post.mediaUrl || post.mediaType === "text") return;
+    const url = getDisplayMediaUrl("", post.mediaUrl);
+    const params = new URLSearchParams({
+      type: post.mediaType,
+      url,
+      mimeType: post.mediaType === "image" ? "image/jpeg" : "video/mp4",
+    });
+    router.push(`/media-viewer?${params.toString()}`);
   };
 
   return (
@@ -125,6 +153,39 @@ export default function ChannelsListScreen() {
           </View>
         ) : (
           <>
+            {ownedChannels.length > 0 ? (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Ma chaîne</Text>
+                </View>
+                {ownedChannels.map((channel) => (
+                  <TouchableOpacity
+                    key={`owned-${channel.id}`}
+                    style={[styles.ownedCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    onPress={() => router.push(`/channel/${channel.id}`)}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.ownedCardBody}>
+                      <Text style={[styles.ownedCardTitle, { color: colors.text }]} numberOfLines={1}>
+                        {channel.name}
+                      </Text>
+                      <Text style={[styles.ownedCardHint, { color: colors.mutedForeground }]}>
+                        {channel.followersCount} abonné{channel.followersCount > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.ownedManageBtn, { borderColor: colors.border }]}
+                      onPress={() => router.push(`/channel/${channel.id}/settings`)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="settings-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.ownedManageText, { color: colors.primary }]}>Gérer</Text>
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
+
             {showFeed ? (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
@@ -139,6 +200,7 @@ export default function ChannelsListScreen() {
                       post={post}
                       onReact={(emoji) => void reactToPost(post.id, emoji).then(() => refreshFeed())}
                       onRecordView={() => void recordView(post.id)}
+                      onOpenMedia={openPostMedia}
                     />
                   ))
                 )}
@@ -259,5 +321,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     fontFamily: "Inter_400Regular",
+  },
+  ownedCard: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  ownedCardBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  ownedCardTitle: {
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+  },
+  ownedCardHint: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+  },
+  ownedManageBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  ownedManageText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
   },
 });

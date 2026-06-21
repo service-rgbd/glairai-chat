@@ -136,9 +136,11 @@ export interface ChatsContextType {
     payload: import("@/lib/emoji-messages").Emoji3dMessagePayload,
   ) => void;
   sendAudioMessage: (chatId: string, payload: { url: string; key: string; durationSeconds: number; mimeType: string }) => void;
-  sendImageMessage: (chatId: string, payload: { url: string; key: string; mimeType: string; width?: number; height?: number }) => void;
+  sendImageMessage: (chatId: string, payload: { url: string; key: string; mimeType: string; width?: number; height?: number; viewOnce?: boolean }) => void;
   sendVideoMessage: (chatId: string, payload: { url: string; key: string; mimeType: string; durationSeconds?: number; thumbnailKey?: string; thumbnailUrl?: string }) => void;
   deleteMessage: (chatId: string, messageId: string) => Promise<void>;
+  consumeViewOnceMessage: (chatId: string, messageId: string) => Promise<void>;
+  reportViewOnceScreenshot: (chatId: string, messageId: string) => Promise<void>;
   editMessage: (chatId: string, messageId: string, content: string) => Promise<void>;
   setTypingState: (chatId: string, isTyping: boolean) => void;
   markChatAsRead: (chatId: string) => void;

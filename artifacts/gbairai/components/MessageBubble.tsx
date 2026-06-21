@@ -6,6 +6,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import type { GMessage, GUser } from "@/contexts/chats-types";
 import { LinkableText } from "@/components/LinkableText";
+import { ViewOnceMediaIcon } from "@/components/ViewOnceMediaIcon";
 import { VoiceNoteBubble } from "@/components/VoiceNoteBubble";
 import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { useChatFontScale } from "@/hooks/useChatFontScale";
@@ -23,6 +24,12 @@ import {
   parseImageMessagePayload,
   parseVideoMessagePayload,
 } from "@/lib/media";
+import {
+  isViewOnceOpenedContent,
+  parseViewOnceOpenedContent,
+  VIEW_ONCE_ALREADY_OPENED_LABEL,
+  VIEW_ONCE_SCREENSHOT_LABEL,
+} from "@/lib/view-once-media";
 
 interface MessageBubbleProps {
   message: GMessage;
@@ -66,6 +73,22 @@ export function MessageBubble({
     videoPayload && (videoPayload.thumbnailKey || videoPayload.thumbnailUrl)
       ? getDisplayMediaUrl(videoPayload.thumbnailKey ?? "", videoPayload.thumbnailUrl)
       : null;
+  const isViewOnceOpened = isViewOnceOpenedContent(message.content);
+  const viewOnceOpenedPayload = isViewOnceOpened ? parseViewOnceOpenedContent(message.content) : null;
+  const isViewOnceImage = Boolean(imagePayload?.viewOnce);
+  const isViewOnceVideo = Boolean(videoPayload?.viewOnce);
+  const isViewOnceMedia = isViewOnceImage || isViewOnceVideo;
+  const isViewOnceCompact = isViewOnceMedia || isViewOnceOpened;
+  const viewOnceMediaKind: "image" | "video" =
+    imagePayload || viewOnceOpenedPayload?.mediaType === "image" || message.type === "image"
+      ? "image"
+      : "video";
+  const viewOnceLabel = isViewOnceOpened
+    ? VIEW_ONCE_ALREADY_OPENED_LABEL
+    : viewOnceMediaKind === "video"
+      ? "Vidéo"
+      : "Photo";
+  const viewOnceScreenshotted = viewOnceOpenedPayload?.screenshotted === true;
   const cachedImageUrl = useCachedMediaUrl(resolvedImageUrl);
   const cachedVideoThumbnailUrl = useCachedMediaUrl(resolvedVideoThumbnailUrl);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
@@ -74,9 +97,11 @@ export function MessageBubble({
     hour: "2-digit",
     minute: "2-digit",
   });
-  const isMediaMessage = Boolean(imagePayload || videoPayload);
+  const isMediaMessage = Boolean(
+    (imagePayload && !isViewOnceImage) || (videoPayload && !isViewOnceVideo),
+  );
   const isAudioMessage = Boolean(audioPayload);
-  const hideDefaultMeta = isMediaMessage || isAudioMessage;
+  const hideDefaultMeta = (isMediaMessage && !isViewOnceCompact) || isAudioMessage || isViewOnceCompact;
   const replyAccentColor = isMe ? "rgba(255,255,255,0.92)" : colors.primary;
   const visibleReactions = Array.isArray(message.reactions)
     ? message.reactions.filter((reaction) => reaction.count > 0)
@@ -182,7 +207,7 @@ export function MessageBubble({
     return "Envoi...";
   };
 
-  const openMediaViewer = (type: "image" | "video") => {
+  const openMediaViewer = (type: "image" | "video", consumeOnClose = false) => {
     const payload = type === "image" ? imagePayload : videoPayload;
     const url = type === "image" ? resolvedImageUrl : resolvedVideoUrl;
     if (!payload || !url) return;
@@ -190,6 +215,9 @@ export function MessageBubble({
       pathname: "/media-viewer",
       params: {
         chatId: message.chatId,
+        messageId: message.id,
+        viewOnce: isViewOnceMedia ? "1" : "",
+        consumeOnClose: consumeOnClose ? "1" : "",
         type,
         url,
         key: payload.key,
@@ -204,6 +232,50 @@ export function MessageBubble({
     });
   };
 
+  const renderViewOnceCompact = (options: { opened: boolean; consumeOnClose: boolean }) => {
+    const iconColor = isMe ? "rgba(255,255,255,0.92)" : colors.chatBubbleReceivedText;
+    const labelColor = isMe ? "rgba(255,255,255,0.95)" : colors.chatBubbleReceivedText;
+    const sublabelColor = isMe ? "rgba(255,255,255,0.72)" : colors.mutedForeground;
+    const timeColor = isMe ? "rgba(255,255,255,0.65)" : colors.mutedForeground;
+    const mediaType = viewOnceMediaKind;
+    const canOpen = !options.opened && (mediaType === "image" ? Boolean(resolvedImageUrl) : Boolean(resolvedVideoUrl));
+
+    const content = (
+      <View style={styles.viewOnceRow}>
+        <ViewOnceMediaIcon color={iconColor} opened={options.opened} />
+        <View style={styles.viewOnceTextCol}>
+          <Text style={[styles.viewOnceRowLabel, { color: labelColor }]} numberOfLines={1}>
+            {viewOnceLabel}
+          </Text>
+          {viewOnceScreenshotted && isMe ? (
+            <Text style={[styles.viewOnceSubLabel, { color: sublabelColor }]} numberOfLines={1}>
+              {VIEW_ONCE_SCREENSHOT_LABEL}
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.viewOnceRowMeta}>
+          <Text style={[styles.viewOnceRowTime, { color: timeColor }]}>{time}</Text>
+          <StatusIcon light={isMe} />
+        </View>
+      </View>
+    );
+
+    if (options.opened || !canOpen) {
+      return content;
+    }
+
+    return (
+      <TouchableOpacity
+        onPress={() => openMediaViewer(mediaType, options.consumeOnClose)}
+        onLongPress={onLongPress}
+        delayLongPress={280}
+        activeOpacity={0.82}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  };
+
   const renderMediaOverlay = () => (
     <View style={styles.mediaOverlay}>
       <Text style={styles.mediaOverlayTime}>{time}</Text>
@@ -216,7 +288,7 @@ export function MessageBubble({
       <TouchableOpacity
         style={[
           styles.bubble,
-          isMediaMessage && styles.mediaBubble,
+          isMediaMessage && !isViewOnceCompact && styles.mediaBubble,
           isAudioMessage && styles.audioBubble,
           {
             backgroundColor: isMe ? colors.chatBubbleSent : colors.chatBubbleReceived,
@@ -257,10 +329,17 @@ export function MessageBubble({
             profileUser={profileUser}
             renderStatusIcon={() => <StatusIcon />}
           />
+        ) : isViewOnceCompact ? (
+          renderViewOnceCompact({
+            opened: isViewOnceOpened,
+            consumeOnClose: !isMe && !isViewOnceOpened,
+          })
         ) : imagePayload ? (
           <TouchableOpacity
             style={styles.mediaWrap}
             onPress={() => openMediaViewer("image")}
+            onLongPress={onLongPress}
+            delayLongPress={280}
             activeOpacity={0.86}
             disabled={!resolvedImageUrl}
           >
@@ -301,6 +380,8 @@ export function MessageBubble({
           <TouchableOpacity
             style={styles.mediaWrap}
             onPress={() => openMediaViewer("video")}
+            onLongPress={onLongPress}
+            delayLongPress={280}
             activeOpacity={0.86}
           >
             <View style={styles.videoThumbWrap}>
@@ -589,6 +670,37 @@ const styles = StyleSheet.create({
   imageFallbackText: {
     fontSize: 13,
     fontFamily: "Inter_500Medium",
+  },
+  viewOnceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    minWidth: 156,
+    paddingVertical: 2,
+  },
+  viewOnceRowLabel: {
+    flexShrink: 1,
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
+  },
+  viewOnceTextCol: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  viewOnceSubLabel: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  viewOnceRowMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: "auto",
+  },
+  viewOnceRowTime: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
   },
   videoThumbWrap: {
     width: 240,

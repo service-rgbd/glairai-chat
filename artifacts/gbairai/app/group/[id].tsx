@@ -55,6 +55,7 @@ export default function GroupInfoScreen() {
     addGroupMembers,
     removeGroupMember,
     leaveGroup,
+    deleteConversation,
     createGroupInviteLink,
     isGroupAdmin,
   } = useChats();
@@ -245,6 +246,33 @@ export default function GroupInfoScreen() {
         },
       },
     ]);
+  };
+
+  const confirmDeleteGroup = () => {
+    if (!chat) return;
+    Alert.alert(
+      "Supprimer le groupe ?",
+      `Le groupe « ${chat.name ?? "Sans nom"} » sera supprimé pour tous les membres. Cette action est irréversible.`,
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: () => {
+            void deleteConversation(chat.id)
+              .then(() => {
+                router.replace("/(tabs)");
+              })
+              .catch((error) => {
+                Alert.alert(
+                  "Suppression impossible",
+                  error instanceof Error ? error.message : "Impossible de supprimer ce groupe.",
+                );
+              });
+          },
+        },
+      ],
+    );
   };
 
   const confirmRemoveMember = (memberId: string, memberName: string) => {
@@ -493,11 +521,11 @@ export default function GroupInfoScreen() {
         ListFooterComponent={
           <TouchableOpacity
             style={[styles.leaveBtn, { borderColor: colors.destructive ?? "#EF4444" }]}
-            onPress={confirmLeaveGroup}
+            onPress={isAdmin ? confirmDeleteGroup : confirmLeaveGroup}
             activeOpacity={0.8}
           >
             <Text style={[styles.leaveBtnText, { color: colors.destructive ?? "#EF4444" }]}>
-              Quitter le groupe
+              {isAdmin ? "Supprimer le groupe" : "Quitter le groupe"}
             </Text>
           </TouchableOpacity>
         }

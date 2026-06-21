@@ -144,7 +144,7 @@ interface ChatInputProps {
   onSend: (text: string) => void;
   onSendEmoji3d?: (payload: Emoji3dMessagePayload) => void;
   onSendAudio?: (payload: { url: string; key: string; durationSeconds: number; mimeType: string }) => void;
-  onSendImage?: (payload: { url: string; key: string; mimeType: string; width?: number; height?: number }) => void;
+  onSendImage?: (payload: { url: string; key: string; mimeType: string; width?: number; height?: number; viewOnce?: boolean }) => void;
   onSendVideo?: (payload: {
     url: string;
     key: string;
@@ -201,6 +201,7 @@ export function ChatInput({
     assetId?: string | null;
   } | null>(null);
   const [isPreparingPreview, setIsPreparingPreview] = useState(false);
+  const [sendImageAsViewOnce, setSendImageAsViewOnce] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
@@ -229,6 +230,7 @@ export function ChatInput({
         mimeType: image.mimeType,
         width: image.width,
         height: image.height,
+        viewOnce: sendImageAsViewOnce || undefined,
       });
     });
   };
@@ -286,6 +288,7 @@ export function ChatInput({
     const mimeType = asset.mimeType ?? (isVideo ? "video/mp4" : "image/jpeg");
 
     if (!isVideo) {
+      setSendImageAsViewOnce(false);
       setPendingImage({
         uri: asset.uri,
         mimeType,
@@ -710,14 +713,20 @@ export function ChatInput({
         animationType="fade"
         presentationStyle="fullScreen"
         onRequestClose={() => {
-          if (!isUploading) setPendingImage(null);
+          if (!isUploading) {
+            setPendingImage(null);
+            setSendImageAsViewOnce(false);
+          }
         }}
       >
         <View style={[styles.previewRoot, { backgroundColor: colors.background }]}>
           <View style={styles.previewHeader}>
             <TouchableOpacity
               style={styles.previewIconBtn}
-              onPress={() => setPendingImage(null)}
+              onPress={() => {
+                setPendingImage(null);
+                setSendImageAsViewOnce(false);
+              }}
               disabled={isUploading}
               activeOpacity={0.75}
             >
@@ -741,10 +750,42 @@ export function ChatInput({
             </View>
           ) : null}
 
+          <View style={styles.previewOptionsRow}>
+            <TouchableOpacity
+              style={[
+                styles.previewOptionChip,
+                {
+                  borderColor: sendImageAsViewOnce ? `${colors.primary}66` : colors.border,
+                  backgroundColor: sendImageAsViewOnce ? `${colors.primary}14` : colors.card,
+                },
+              ]}
+              onPress={() => setSendImageAsViewOnce((current) => !current)}
+              disabled={isUploading}
+              activeOpacity={0.82}
+            >
+              <Ionicons
+                name={sendImageAsViewOnce ? "eye-off-outline" : "eye-outline"}
+                size={20}
+                color={sendImageAsViewOnce ? colors.primary : colors.text}
+              />
+              <Text
+                style={[
+                  styles.previewOptionText,
+                  { color: sendImageAsViewOnce ? colors.primary : colors.text },
+                ]}
+              >
+                Vue unique
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <View style={styles.previewActions}>
             <TouchableOpacity
               style={[styles.previewSecondaryBtn, { borderColor: colors.border }]}
-              onPress={() => setPendingImage(null)}
+              onPress={() => {
+                setPendingImage(null);
+                setSendImageAsViewOnce(false);
+              }}
               disabled={isUploading}
               activeOpacity={0.8}
             >
@@ -759,6 +800,7 @@ export function ChatInput({
                 void uploadPendingImage(pendingImage)
                   .then(() => {
                     setPendingImage(null);
+                    setSendImageAsViewOnce(false);
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   })
                   .catch((error) => {
@@ -1081,11 +1123,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
+  previewOptionsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  previewOptionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  previewOptionText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
   previewActions: {
     flexDirection: "row",
     gap: 12,
     paddingHorizontal: 16,
-    paddingTop: 14,
+    paddingTop: 10,
     paddingBottom: Platform.OS === "ios" ? 34 : 18,
   },
   previewSecondaryBtn: {

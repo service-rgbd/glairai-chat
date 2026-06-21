@@ -19,6 +19,8 @@ export type StoredDeviceKeys = {
 export type StoredSession = {
   peerUserId: string;
   rootKey: string;
+  /** Clé publique d'identité du pair au moment du handshake (détection rotation). */
+  peerIdentityPublic?: string;
 };
 
 export type PreKeyBundle = {
@@ -35,6 +37,8 @@ export type PreKeyBundle = {
 export type E2eInitEnvelope = {
   v: 1;
   t: "init";
+  mode?: "ik";
+  to?: string;
   ep: string;
   ik: string;
   spk: number;

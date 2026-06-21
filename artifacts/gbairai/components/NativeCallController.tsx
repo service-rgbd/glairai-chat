@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   endNativeCall,
@@ -20,6 +20,13 @@ import { afterAuthNativeDelay } from "@/lib/post-auth-native-delay";
 export function NativeCallController() {
   const { authToken } = useAuth();
   const { recordCall } = useChats();
+  const authTokenRef = useRef(authToken);
+  const recordCallRef = useRef(recordCall);
+
+  useEffect(() => {
+    authTokenRef.current = authToken;
+    recordCallRef.current = recordCall;
+  }, [authToken, recordCall]);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,7 +36,7 @@ export function NativeCallController() {
         const incoming = getIncomingCall();
         if (!incoming || incoming.callId !== callId) return;
 
-        const localCallId = recordCall({
+        const localCallId = recordCallRef.current({
           userId: incoming.callerUserId,
           conversationId: incoming.conversationId,
           type: incoming.callType,
@@ -56,9 +63,10 @@ export function NativeCallController() {
         if (!incoming || incoming.callId !== callId) return;
 
         void (async () => {
-          if (authToken) {
+          const token = authTokenRef.current;
+          if (token) {
             try {
-              await signalConversationCall(incoming.callId, "decline", authToken, {
+              await signalConversationCall(incoming.callId, "decline", token, {
                 conversationId: incoming.conversationId,
                 callType: incoming.callType,
                 callerUserId: incoming.callerUserId,
@@ -75,13 +83,13 @@ export function NativeCallController() {
                   callType: incoming.callType,
                   outcome: "declined",
                 },
-                authToken,
+                token,
               );
             } catch {
               // Best effort.
             }
           }
-          recordCall({
+          recordCallRef.current({
             id: `calllog_${incoming.callId}`,
             userId: incoming.callerUserId,
             conversationId: incoming.conversationId,
@@ -102,9 +110,6 @@ export function NativeCallController() {
     const cancelDelay = afterAuthNativeDelay(() => {
       if (cancelled) return;
       void setupNativeCallUi(handlers).then((ok) => {
-        if (__DEV__) {
-          console.log("[Gbairai] CallKit bootstrap", ok ? "ok" : "différé (VoIP)");
-        }
         if (ok) {
           void import("@/lib/voip-push").then(({ requestVoipPushTokenAfterCallKit }) => {
             requestVoipPushTokenAfterCallKit();
@@ -117,7 +122,7 @@ export function NativeCallController() {
       cancelled = true;
       cancelDelay();
     };
-  }, [authToken, recordCall]);
+  }, []);
 
   return null;
 }

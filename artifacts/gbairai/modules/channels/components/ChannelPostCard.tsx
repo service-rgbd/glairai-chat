@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useEffect } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
@@ -15,9 +16,26 @@ type ChannelPostCardProps = {
   post: ChannelPost;
   onReact: (emoji: string) => void;
   onRecordView: () => void;
+  onOpenMedia?: (post: ChannelPost) => void;
 };
 
-export function ChannelPostCard({ post, onReact, onRecordView }: ChannelPostCardProps) {
+function ChannelVideoPreview({ url }: { url: string }) {
+  const player = useVideoPlayer(url, (instance) => {
+    instance.loop = false;
+    instance.muted = true;
+  });
+
+  return (
+    <VideoView
+      player={player}
+      style={styles.media}
+      contentFit="cover"
+      nativeControls
+    />
+  );
+}
+
+export function ChannelPostCard({ post, onReact, onRecordView, onOpenMedia }: ChannelPostCardProps) {
   const colors = useColors();
   const channelName = post.channel?.name ?? "Chaîne";
   const initials = channelName.slice(0, 2).toUpperCase();
@@ -58,17 +76,25 @@ export function ChannelPostCard({ post, onReact, onRecordView }: ChannelPostCard
       ) : null}
 
       {post.mediaUrl && post.mediaType === "image" ? (
-        <Image
-          source={{ uri: getDisplayMediaUrl(post.mediaUrl) }}
-          style={styles.media}
-          contentFit="cover"
-        />
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={() => onOpenMedia?.(post)}
+        >
+          <Image
+            source={{ uri: getDisplayMediaUrl("", post.mediaUrl) }}
+            style={styles.media}
+            contentFit="cover"
+          />
+        </TouchableOpacity>
       ) : null}
 
       {post.mediaUrl && post.mediaType === "video" ? (
-        <View style={[styles.videoPlaceholder, { backgroundColor: colors.card }]}>
-          <Ionicons name="play-circle" size={48} color="#fff" />
-        </View>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => onOpenMedia?.(post)}
+        >
+          <ChannelVideoPreview url={getDisplayMediaUrl("", post.mediaUrl)} />
+        </TouchableOpacity>
       ) : null}
 
       <View style={styles.statsRow}>
@@ -150,6 +176,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 220,
     borderRadius: 12,
+    backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",
   },

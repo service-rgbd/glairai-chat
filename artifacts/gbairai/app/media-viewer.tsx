@@ -2,13 +2,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { File, Paths } from "expo-file-system";
 import { Image } from "expo-image";
 import * as MediaLibrary from "expo-media-library";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
-import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  BackHandler,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useChats } from "@/contexts/chats-context-ref";
+import { useViewOnceScreenshotGuard } from "@/hooks/useViewOnceScreenshotGuard";
 import { useColors } from "@/hooks/useColors";
 
 type MediaType = "image" | "video";
@@ -43,21 +53,71 @@ function getFileExtension(url: string, mimeType: string, type: MediaType) {
 
 export default function MediaViewerScreen() {
   const params = useLocalSearchParams();
+  const navigation = useNavigation();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { sendImageMessage, sendVideoMessage } = useChats();
+  const { sendImageMessage, sendVideoMessage, consumeViewOnceMessage, reportViewOnceScreenshot } =
+    useChats();
   const [isSaving, setIsSaving] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const consumedRef = useRef(false);
 
   const type = singleParam(params.type) === "video" ? "video" : "image";
   const chatId = singleParam(params.chatId) ?? "";
+  const messageId = singleParam(params.messageId) ?? "";
+  const isViewOnceMode = singleParam(params.viewOnce) === "1";
+  const consumeOnClose = singleParam(params.consumeOnClose) === "1";
   const url = singleParam(params.url) ?? "";
   const key = singleParam(params.key) ?? "";
   const mimeType = singleParam(params.mimeType) ?? (type === "image" ? "image/jpeg" : "video/mp4");
   const width = numberParam(params.width);
   const height = numberParam(params.height);
   const durationSeconds = numberParam(params.durationSeconds);
-  const title = type === "image" ? "Photo" : "Vidéo";
+  const title = isViewOnceMode ? "Photo à vue unique" : type === "image" ? "Photo" : "Vidéo";
+
+  const finishViewOnce = useCallback(() => {
+    if (!consumeOnClose || !messageId || !chatId || consumedRef.current) {
+      return;
+    }
+    consumedRef.current = true;
+    void consumeViewOnceMessage(chatId, messageId);
+  }, [chatId, consumeOnClose, consumeViewOnceMessage, messageId]);
+
+  const handleClose = useCallback(() => {
+    finishViewOnce();
+    router.back();
+  }, [finishViewOnce]);
+
+  const handleScreenshotConfirm = useCallback(() => {
+    if (!messageId || !chatId) return;
+    void reportViewOnceScreenshot(chatId, messageId);
+  }, [chatId, messageId, reportViewOnceScreenshot]);
+
+  useViewOnceScreenshotGuard({
+    enabled: isViewOnceMode && consumeOnClose,
+    onConfirmScreenshot: handleScreenshotConfirm,
+  });
+
+  useEffect(() => {
+    if (!consumeOnClose) return;
+
+    const unsubscribe = navigation.addListener("beforeRemove", () => {
+      finishViewOnce();
+    });
+
+    return unsubscribe;
+  }, [consumeOnClose, finishViewOnce, navigation]);
+
+  useEffect(() => {
+    if (!consumeOnClose || Platform.OS !== "android") return;
+
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleClose();
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [consumeOnClose, handleClose]);
 
   const imageAspectRatio = useMemo(() => {
     if (!width || !height) return 1;
@@ -69,6 +129,10 @@ export default function MediaViewerScreen() {
   });
 
   const saveMedia = async () => {
+    if (isViewOnceMode) {
+      Alert.alert("Action impossible", "Les médias à vue unique ne peuvent pas être enregistrés.");
+      return;
+    }
     if (!url) return;
     if (Platform.OS === "web") {
       Alert.alert("Enregistrement", "L'enregistrement dans la galerie est disponible sur mobile.");
@@ -105,6 +169,10 @@ export default function MediaViewerScreen() {
   };
 
   const resendMedia = () => {
+    if (isViewOnceMode) {
+      Alert.alert("Action impossible", "Les médias à vue unique ne peuvent pas être renvoyés.");
+      return;
+    }
     if (!chatId || !key || !url) return;
     setIsResending(true);
     try {
@@ -122,7 +190,7 @@ export default function MediaViewerScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity style={styles.iconButton} onPress={() => router.back()} activeOpacity={0.75}>
+        <TouchableOpacity style={styles.iconButton} onPress={handleClose} activeOpacity={0.75}>
           <Ionicons name="close" size={28} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.title}>{title}</Text>
@@ -144,33 +212,43 @@ export default function MediaViewerScreen() {
       </View>
 
       <View style={[styles.actions, { paddingBottom: insets.bottom + 18 }]}>
-        <TouchableOpacity
-          style={[styles.actionButton, { borderColor: "rgba(255,255,255,0.22)" }]}
-          onPress={saveMedia}
-          disabled={isSaving || !url}
-          activeOpacity={0.82}
-        >
-          {isSaving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Ionicons name="download-outline" size={21} color="#fff" />
-          )}
-          <Text style={styles.actionText}>Enregistrer</Text>
-        </TouchableOpacity>
+        {isViewOnceMode ? (
+          <Text style={styles.viewOnceHint}>
+            {consumeOnClose
+              ? "Ce média disparaîtra à la fermeture. L'enregistrement est désactivé."
+              : "Aperçu à vue unique. L'enregistrement est désactivé."}
+          </Text>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={[styles.actionButton, { borderColor: "rgba(255,255,255,0.22)" }]}
+              onPress={saveMedia}
+              disabled={isSaving || !url}
+              activeOpacity={0.82}
+            >
+              {isSaving ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Ionicons name="download-outline" size={21} color="#fff" />
+              )}
+              <Text style={styles.actionText}>Enregistrer</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.actionButton, styles.primaryButton, { backgroundColor: colors.primary }]}
-          onPress={resendMedia}
-          disabled={isResending || !chatId || !key || !url}
-          activeOpacity={0.82}
-        >
-          {isResending ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Ionicons name="send-outline" size={20} color="#fff" />
-          )}
-          <Text style={styles.actionText}>Renvoyer</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.primaryButton, { backgroundColor: colors.primary }]}
+              onPress={resendMedia}
+              disabled={isResending || !chatId || !key || !url}
+              activeOpacity={0.82}
+            >
+              {isResending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Ionicons name="send-outline" size={20} color="#fff" />
+              )}
+              <Text style={styles.actionText}>Renvoyer</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </View>
   );
@@ -236,5 +314,13 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
+  },
+  viewOnceHint: {
+    flex: 1,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 20,
   },
 });

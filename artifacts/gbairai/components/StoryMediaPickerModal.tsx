@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
+import { prepareLocalMediaUriForUpload } from "@/lib/media";
 
 type PickerTab = "photos" | "albums";
 type QuickAction = "text" | "composition" | "voice" | "ai";
@@ -38,7 +39,12 @@ interface StoryMediaPickerModalProps {
   visible: boolean;
   onClose: () => void;
   onSelectText: () => void;
-  onSelectAsset: (payload: { uri: string; mediaType: "image" | "video"; mimeType: string | null }) => void;
+  onSelectAsset: (payload: {
+    uri: string;
+    mediaType: "image" | "video";
+    mimeType: string | null;
+    assetId?: string | null;
+  }) => void;
 }
 
 const GRID_GAP = 2;
@@ -59,6 +65,7 @@ export function StoryMediaPickerModal({
   const [tab, setTab] = useState<PickerTab>("photos");
   const [permission, setPermission] = useState<MediaLibrary.PermissionResponse | null>(null);
   const [loadingAssets, setLoadingAssets] = useState(false);
+  const [preparingAssetId, setPreparingAssetId] = useState<string | null>(null);
   const [assets, setAssets] = useState<GalleryAsset[]>([]);
 
   const cellSize = useMemo(() => {
@@ -127,6 +134,24 @@ export function StoryMediaPickerModal({
     return response.granted;
   };
 
+  const selectPreparedAsset = async (input: {
+    uri: string;
+    mediaType: "image" | "video";
+    mimeType: string;
+    assetId?: string | null;
+  }) => {
+    const uri =
+      Platform.OS === "ios"
+        ? await prepareLocalMediaUriForUpload(input.uri, input.mimeType, input.assetId)
+        : input.uri;
+    onSelectAsset({
+      uri,
+      mediaType: input.mediaType,
+      mimeType: input.mimeType,
+      assetId: input.assetId,
+    });
+  };
+
   const pickFromLibrary = async (mediaTypes: ImagePicker.MediaType[]) => {
     const granted = await ensureGalleryPermission();
     if (!granted) return;
@@ -135,15 +160,27 @@ export function StoryMediaPickerModal({
       mediaTypes,
       allowsEditing: mediaTypes.includes("images") && mediaTypes.length === 1,
       quality: 0.85,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     });
     if (result.canceled || !result.assets[0]?.uri) return;
 
     const asset = result.assets[0];
-    onSelectAsset({
-      uri: asset.uri,
-      mediaType: asset.type === "video" ? "video" : "image",
-      mimeType: asset.mimeType ?? (asset.type === "video" ? "video/mp4" : "image/jpeg"),
-    });
+    const mediaType = asset.type === "video" ? "video" : "image";
+    const mimeType = asset.mimeType ?? (mediaType === "video" ? "video/mp4" : "image/jpeg");
+    try {
+      await selectPreparedAsset({
+        uri: asset.uri,
+        mediaType,
+        mimeType,
+        assetId: asset.assetId,
+      });
+    } catch (error) {
+      Alert.alert(
+        "Impossible d'ouvrir ce média",
+        error instanceof Error ? error.message : "Réessayez avec un autre fichier.",
+      );
+    }
   };
 
   const handleQuickAction = async (action: QuickAction) => {
@@ -188,21 +225,44 @@ export function StoryMediaPickerModal({
     if (result.canceled || !result.assets[0]?.uri) return;
 
     const asset = result.assets[0];
-    onSelectAsset({
-      uri: asset.uri,
-      mediaType: asset.type === "video" ? "video" : "image",
-      mimeType: asset.mimeType ?? (asset.type === "video" ? "video/mp4" : "image/jpeg"),
-    });
+    const mediaType = asset.type === "video" ? "video" : "image";
+    const mimeType = asset.mimeType ?? (mediaType === "video" ? "video/mp4" : "image/jpeg");
+    try {
+      await selectPreparedAsset({
+        uri: asset.uri,
+        mediaType,
+        mimeType,
+        assetId: asset.assetId,
+      });
+    } catch (error) {
+      Alert.alert(
+        "Impossible d'utiliser ce média",
+        error instanceof Error ? error.message : "Réessayez.",
+      );
+    }
   };
 
   const handleGalleryPress = async (item: GalleryAsset) => {
-    const info = await MediaLibrary.getAssetInfoAsync(item.id);
-    const uri = info.localUri ?? item.uri;
-    onSelectAsset({
-      uri,
-      mediaType: item.mediaType === "video" ? "video" : "image",
-      mimeType: item.mediaType === "video" ? "video/mp4" : "image/jpeg",
-    });
+    const mimeType = item.mediaType === "video" ? "video/mp4" : "image/jpeg";
+    setPreparingAssetId(item.id);
+    try {
+      const info = await MediaLibrary.getAssetInfoAsync(item.id, {
+        shouldDownloadFromNetwork: true,
+      });
+      await selectPreparedAsset({
+        uri: info.localUri ?? item.uri,
+        mediaType: item.mediaType === "video" ? "video" : "image",
+        mimeType,
+        assetId: item.id,
+      });
+    } catch (error) {
+      Alert.alert(
+        "Impossible d'ouvrir ce média",
+        error instanceof Error ? error.message : "Réessayez avec un autre fichier.",
+      );
+    } finally {
+      setPreparingAssetId(null);
+    }
   };
 
   const quickActions: { key: QuickAction; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -284,8 +344,14 @@ export function StoryMediaPickerModal({
               style={[styles.gridCell, { width: cellSize, height: cellSize }]}
               onPress={() => void handleGalleryPress(item)}
               activeOpacity={0.88}
+              disabled={preparingAssetId === item.id}
             >
               <Image source={{ uri: item.uri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+              {preparingAssetId === item.id ? (
+                <View style={styles.preparingOverlay}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              ) : null}
               {item.mediaType === "video" ? (
                 <View style={styles.videoBadge}>
                   <Ionicons name="play" size={14} color="#fff" />
@@ -503,6 +569,12 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preparingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
     justifyContent: "center",
   },

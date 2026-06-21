@@ -2,7 +2,7 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Platform,
@@ -25,7 +25,7 @@ import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import { openGlobalSearch } from "@/lib/navigation";
 import { generateVideoThumbnailUri, getDisplayMediaUrl, parseStoryMediaPayload } from "@/lib/media";
-import { openUserStories } from "@/lib/story-playback";
+import { openUserStories, groupStoriesByUser } from "@/lib/story-playback";
 import type { UploadStatus } from "@/lib/upload-status";
 
 export default function StatusScreen() {
@@ -33,7 +33,7 @@ export default function StatusScreen() {
   const insets = useSafeAreaInsets();
   const { compose } = useLocalSearchParams<{ compose?: string }>();
   const { currentUser } = useAuth();
-  const { stories, users, createStory } = useChats();
+  const { stories, users, createStory, isUserBlocked } = useChats();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
   const currentUserId = currentUser?.id ?? "me";
@@ -57,13 +57,16 @@ export default function StatusScreen() {
   }, [compose]);
 
   const myStories = stories.filter((s) => s.userId === currentUserId);
-  const othersStories = Object.values(users)
-    .filter((u) => u.id !== currentUserId)
-    .map((u) => ({
-      user: u,
-      stories: stories.filter((s) => s.userId === u.id),
-    }))
-    .filter((g) => g.stories.length > 0);
+  const othersStories = useMemo(
+    () =>
+      groupStoriesByUser({
+        stories,
+        users,
+        currentUserId,
+        isUserBlocked,
+      }),
+    [stories, users, currentUserId, isUserBlocked],
+  );
 
   const meUser: GUser = {
     id: currentUserId,
@@ -98,6 +101,7 @@ export default function StatusScreen() {
     uri: string;
     mediaType: "image" | "video";
     mimeType: string | null;
+    assetId?: string | null;
   }) => {
     if (payload.mediaType === "video") {
       try {
@@ -107,6 +111,7 @@ export default function StatusScreen() {
           text: "",
           mediaUri: payload.uri,
           mimeType: payload.mimeType ?? "video/mp4",
+          mediaAssetId: payload.assetId,
           backgroundColor: "#0F172A",
           previewThumbnailUri,
         });
@@ -116,6 +121,7 @@ export default function StatusScreen() {
           text: "",
           mediaUri: payload.uri,
           mimeType: payload.mimeType ?? "video/mp4",
+          mediaAssetId: payload.assetId,
           backgroundColor: "#0F172A",
           previewThumbnailUri: null,
         });
@@ -126,6 +132,7 @@ export default function StatusScreen() {
         text: "",
         mediaUri: payload.uri,
         mimeType: payload.mimeType ?? "image/jpeg",
+        mediaAssetId: payload.assetId,
         backgroundColor: "#0F172A",
         previewThumbnailUri: null,
       });

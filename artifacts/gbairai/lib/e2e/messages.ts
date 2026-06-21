@@ -6,6 +6,8 @@ import { loadSession, saveSession } from "@/lib/e2e/store";
 
 export { isE2ePayload, E2E_FALLBACK_LABEL };
 
+const e2eDecryptWarningKeys = new Set<string>();
+
 export function shouldEncryptDirectText(chatType: string, messageType: string) {
   return isE2eEnabled() && chatType === "direct" && messageType === "text";
 }
@@ -30,14 +32,11 @@ export async function encryptDirectTextMessage(
       throw new Error("Clés E2E indisponibles");
     }
 
-    let session = await loadSession(userId, peerUserId);
-    let bundle = null;
-    if (!session) {
-      bundle = await fetchPreKeyBundle(peerUserId);
-    }
-
-    const result = encryptForPeer(deviceKeys, session, bundle, peerUserId, plaintext);
-    await saveSession(userId, result.session);
+    const bundle = await fetchPreKeyBundle(peerUserId);
+    // Chaque message est autonome tant que le stockage ne distingue pas les
+    // sessions entrantes et sortantes. Cela évite les racines de session
+    // écrasées qui provoquent "aes/gcm: invalid ghash tag".
+    const result = encryptForPeer(deviceKeys, null, bundle, peerUserId, plaintext);
     return result.content;
   } catch (error) {
     if (isPeerKeysMissingError(error)) {
@@ -83,7 +82,16 @@ export async function tryDecryptDirectTextMessage(
 
   try {
     return await decryptDirectTextMessage(userId, senderUserId, content);
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const warningKey = `${senderUserId}:${message}:${content.slice(0, 80)}`;
+    if (__DEV__ && !e2eDecryptWarningKeys.has(warningKey)) {
+      e2eDecryptWarningKeys.add(warningKey);
+      console.warn("[Gbairai] E2E decrypt impossible:", {
+        senderUserId,
+        error: message,
+      });
+    }
     return E2E_FALLBACK_LABEL;
   }
 }

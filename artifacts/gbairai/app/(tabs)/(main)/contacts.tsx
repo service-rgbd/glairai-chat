@@ -4,7 +4,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
+  Linking,
   Modal,
   Platform,
   Share,
@@ -21,6 +23,7 @@ import { SearchBar } from "@/components/SearchBar";
 import type { ComposeContactOption } from "@/contexts/chats-types";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
+import { isContactsPermissionDenied } from "@/lib/contacts-sync";
 
 export default function ContactsScreen() {
   const colors = useColors();
@@ -33,6 +36,7 @@ export default function ContactsScreen() {
   const [renameTarget, setRenameTarget] = useState<ComposeContactOption | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [isRenaming, setIsRenaming] = useState(false);
+  const [permissionBlocked, setPermissionBlocked] = useState(() => isContactsPermissionDenied());
   const getComposeContactsRef = useRef(getComposeContacts);
   getComposeContactsRef.current = getComposeContacts;
 
@@ -55,6 +59,7 @@ export default function ContactsScreen() {
         const next = await getComposeContactsRef.current();
         if (!cancelled) {
           setContacts(next);
+          setPermissionBlocked(isContactsPermissionDenied());
         }
       } finally {
         if (!cancelled) {
@@ -68,6 +73,19 @@ export default function ContactsScreen() {
       cancelled = true;
     };
   }, [composeContactsSnapshot.length]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      if (!isContactsPermissionDenied() && contacts.length > 0) return;
+      void getComposeContactsRef.current({ force: true }).then((next) => {
+        setContacts(next);
+        setPermissionBlocked(isContactsPermissionDenied());
+        setLoading(false);
+      });
+    });
+    return () => subscription.remove();
+  }, [contacts.length]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -123,6 +141,21 @@ export default function ContactsScreen() {
     }
   };
 
+  const retryContactsAccess = async (forceSettings = false) => {
+    if (forceSettings) {
+      await Linking.openSettings();
+      return;
+    }
+    setLoading(true);
+    try {
+      const next = await getComposeContactsRef.current({ force: true });
+      setContacts(next);
+      setPermissionBlocked(isContactsPermissionDenied());
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleLongPress = (item: ComposeContactOption) => {
     if (item.contactSource !== "story_reply" && item.contactSource !== "manual") {
       return;
@@ -146,6 +179,25 @@ export default function ContactsScreen() {
       </View>
 
       <SearchBar value={search} onChangeText={setSearch} placeholder="Rechercher un contact..." />
+
+      {!loading && contacts.length === 0 ? (
+        <View style={[styles.permissionBanner, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+          <Text style={[styles.permissionText, { color: colors.text }]}>
+            {permissionBlocked
+              ? "L'accès aux contacts est désactivé. Autorisez Gbairai dans les réglages du téléphone."
+              : "Autorisez l'accès à vos contacts pour retrouver vos amis sur Gbairai."}
+          </Text>
+          <TouchableOpacity
+            style={[styles.permissionBtn, { backgroundColor: colors.primary }]}
+            onPress={() => void retryContactsAccess(permissionBlocked)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.permissionBtnText}>
+              {permissionBlocked ? "Ouvrir les réglages" : "Autoriser les contacts"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <FlatList
         data={filtered}
@@ -242,6 +294,31 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: "Inter_700Bold",
     letterSpacing: -0.3,
+  },
+  permissionBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+  },
+  permissionText: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 20,
+  },
+  permissionBtn: {
+    alignSelf: "flex-start",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  permissionBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
   row: {
     flexDirection: "row",

@@ -39,27 +39,11 @@ function decryptBytes(messageKey: Uint8Array, nonce: Uint8Array, ciphertext: Uin
 }
 
 function deriveInitiatorRootKey(
-  identityPrivate: Uint8Array,
   ephemeralPrivate: Uint8Array,
   bundle: PreKeyBundle,
 ) {
   const peerIdentity = base64ToBytes(bundle.identityKeyPublic);
-  const peerSignedPreKey = base64ToBytes(bundle.signedPreKeyPublic);
-  const peerOneTimePreKey = bundle.oneTimePreKey
-    ? base64ToBytes(bundle.oneTimePreKey.publicKey)
-    : null;
-
-  const parts = [
-    x25519.getSharedSecret(identityPrivate, peerSignedPreKey),
-    x25519.getSharedSecret(ephemeralPrivate, peerIdentity),
-    x25519.getSharedSecret(ephemeralPrivate, peerSignedPreKey),
-  ];
-
-  if (peerOneTimePreKey) {
-    parts.push(x25519.getSharedSecret(ephemeralPrivate, peerOneTimePreKey));
-  }
-
-  return deriveRootKey(parts);
+  return deriveRootKey([x25519.getSharedSecret(ephemeralPrivate, peerIdentity)]);
 }
 
 function deriveResponderRootKey(
@@ -70,6 +54,11 @@ function deriveResponderRootKey(
   const senderEphemeral = base64ToBytes(envelope.ep);
   const signedPreKeyPrivate = base64ToBytes(deviceKeys.signedPreKeyPrivate);
   const identityPrivate = base64ToBytes(deviceKeys.identityPrivate);
+
+  if (envelope.mode === "ik") {
+    return deriveRootKey([x25519.getSharedSecret(identityPrivate, senderEphemeral)]);
+  }
+
   const oneTimePrivate = consumeOneTimePreKey(deviceKeys, envelope.opk);
 
   const parts = [
@@ -127,19 +116,20 @@ export function encryptForPeer(
     throw new Error("Bundle de clés E2E indisponible");
   }
 
-  const identityPrivate = base64ToBytes(deviceKeys.identityPrivate);
   const ephemeral = x25519.keygen();
-  const rootKey = deriveInitiatorRootKey(identityPrivate, ephemeral.secretKey, bundle);
+  const rootKey = deriveInitiatorRootKey(ephemeral.secretKey, bundle);
   const messageKey = deriveMessageKey(rootKey);
   const { nonce, ciphertext } = encryptBytes(messageKey, plaintextBytes);
 
   const envelope: E2eEnvelope = {
     v: 1,
     t: "init",
+    mode: "ik",
+    to: bundle.deviceId,
     ep: bytesToBase64(ephemeral.publicKey),
     ik: deviceKeys.identityPublic,
     spk: bundle.signedPreKeyId,
-    opk: bundle.oneTimePreKey?.keyId ?? null,
+    opk: null,
     n: bytesToBase64(nonce),
     ct: bytesToBase64(ciphertext),
   };
@@ -149,6 +139,7 @@ export function encryptForPeer(
     session: {
       peerUserId,
       rootKey: bytesToBase64(rootKey),
+      peerIdentityPublic: bundle.identityKeyPublic,
     },
   };
 }
@@ -168,10 +159,14 @@ export function decryptFromPeer(
   let rootKeyBytes: Uint8Array;
 
   if (envelope.t === "init") {
+    if (envelope.to && envelope.to !== deviceKeys.deviceId) {
+      throw new Error(`Message E2E destiné à un autre appareil (${envelope.to})`);
+    }
     rootKeyBytes = deriveResponderRootKey(deviceKeys, envelope);
     nextSession = {
       peerUserId: senderUserId,
       rootKey: bytesToBase64(rootKeyBytes),
+      peerIdentityPublic: envelope.ik,
     };
   } else {
     if (!session) {

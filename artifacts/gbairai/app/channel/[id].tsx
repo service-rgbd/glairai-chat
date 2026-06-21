@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -21,6 +22,7 @@ import { ChannelPostCard } from "@/modules/channels/components/ChannelPostCard";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
 import { uploadChannelImage } from "@/modules/channels/lib/upload-image";
 import type { Channel, ChannelPost } from "@/modules/channels/types";
+import { getDisplayMediaUrl } from "@/lib/media";
 import { useColors } from "@/hooks/useColors";
 
 export default function ChannelDetailsScreen() {
@@ -37,6 +39,7 @@ export default function ChannelDetailsScreen() {
     publishPost,
     reactToPost,
     recordView,
+    reportChannel,
     refreshFeed,
   } = useChannels();
 
@@ -47,9 +50,14 @@ export default function ChannelDetailsScreen() {
   const [posts, setPosts] = useState<ChannelPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
-  const [pendingImage, setPendingImage] = useState<{ uri: string; mimeType: string } | null>(null);
+  const [pendingImage, setPendingImage] = useState<{
+    uri: string;
+    mimeType: string;
+    assetId?: string | null;
+  } | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -80,6 +88,46 @@ export default function ChannelDetailsScreen() {
     }
   };
 
+  const openPostMedia = (post: ChannelPost) => {
+    if (!post.mediaUrl || post.mediaType === "text") return;
+    const url = getDisplayMediaUrl("", post.mediaUrl);
+    const params = new URLSearchParams({
+      type: post.mediaType,
+      url,
+      mimeType: post.mediaType === "image" ? "image/jpeg" : "video/mp4",
+    });
+    router.push(`/media-viewer?${params.toString()}`);
+  };
+
+  const handleReportChannel = () => {
+    if (!channel || reporting) return;
+    Alert.alert(
+      "Signaler cette chaîne",
+      "Voulez-vous envoyer un signalement à l'équipe de modération ?",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Signaler",
+          style: "destructive",
+          onPress: () => {
+            setReporting(true);
+            void reportChannel(channel.id, "Signalement utilisateur depuis la fiche chaîne")
+              .then(() => {
+                Alert.alert("Signalement envoyé", "Merci. Notre équipe examinera cette chaîne.");
+              })
+              .catch((error) => {
+                Alert.alert(
+                  "Signalement impossible",
+                  error instanceof Error ? error.message : "Veuillez réessayer plus tard.",
+                );
+              })
+              .finally(() => setReporting(false));
+          },
+        },
+      ],
+    );
+  };
+
   const pickAnnouncementImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) return;
@@ -95,6 +143,7 @@ export default function ChannelDetailsScreen() {
       setPendingImage({
         uri: result.assets[0].uri,
         mimeType: result.assets[0].mimeType ?? "image/jpeg",
+        assetId: result.assets[0].assetId,
       });
     }
   };
@@ -113,6 +162,7 @@ export default function ChannelDetailsScreen() {
           pendingImage.uri,
           pendingImage.mimeType,
           "chat-image",
+          pendingImage.assetId,
         );
       }
 
@@ -177,23 +227,88 @@ export default function ChannelDetailsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: bottomPad + 120 }}>
-        {channel.description ? (
-          <Text style={[styles.description, { color: colors.mutedForeground }]}>
-            {channel.description}
-          </Text>
-        ) : null}
+        <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.infoHeader}>
+            <Avatar uri={channel.avatarUrl} initials={initials} color="#6D4AFF" size={64} />
+            <View style={styles.infoBody}>
+              <View style={styles.nameRow}>
+                <Text style={[styles.infoName, { color: colors.text }]} numberOfLines={1}>
+                  {channel.name}
+                </Text>
+                {channel.isVerified ? (
+                  <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                ) : null}
+              </View>
+              <Text style={[styles.infoFollowers, { color: colors.mutedForeground }]}>
+                {channel.followersCount} abonnés
+              </Text>
+              {channel.category ? (
+                <Text style={[styles.infoCategory, { color: colors.primary }]}>
+                  {channel.category}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          {channel.description ? (
+            <Text style={[styles.description, { color: colors.mutedForeground }]}>
+              {channel.description}
+            </Text>
+          ) : (
+            <Text style={[styles.description, { color: colors.mutedForeground }]}>
+              Aucune description pour cette chaîne.
+            </Text>
+          )}
+          <View style={styles.infoActions}>
+            <TouchableOpacity
+              style={[styles.infoAction, { borderColor: colors.border }]}
+              onPress={() => void handleFollow()}
+              disabled={followBusy}
+              activeOpacity={0.82}
+            >
+              <Ionicons
+                name={channel.isFollowing ? "notifications" : "notifications-outline"}
+                size={18}
+                color={colors.primary}
+              />
+              <Text style={[styles.infoActionText, { color: colors.text }]}>
+                {channel.isFollowing ? "Notifications actives" : "Suivre et notifier"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.infoAction, { borderColor: colors.border }]}
+              onPress={handleReportChannel}
+              disabled={reporting}
+              activeOpacity={0.82}
+            >
+              <Ionicons name="flag-outline" size={18} color={colors.destructive} />
+              <Text style={[styles.infoActionText, { color: colors.destructive }]}>
+                {reporting ? "Envoi..." : "Signaler"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {posts.map((post) => (
           <ChannelPostCard
             key={post.id}
             post={{ ...post, channel }}
             onReact={(emoji) =>
-              void reactToPost(post.id, emoji).then(async () => {
-                const nextPosts = await getChannelPosts(channel.id);
-                setPosts(nextPosts);
-              })
+              void reactToPost(post.id, emoji)
+                .then(async () => {
+                  const nextPosts = await getChannelPosts(channel.id);
+                  setPosts(nextPosts);
+                })
+                .catch((error) => {
+                  Alert.alert(
+                    "Réaction impossible",
+                    error instanceof Error
+                      ? error.message
+                      : "Suivez cette chaîne pour réagir à ses publications.",
+                  );
+                })
             }
             onRecordView={() => void recordView(post.id)}
+            onOpenMedia={openPostMedia}
           />
         ))}
 
@@ -298,10 +413,58 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   channelName: { fontSize: 16, fontFamily: "Inter_600SemiBold", flexShrink: 1 },
   followers: { fontSize: 12, fontFamily: "Inter_400Regular" },
-  description: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  infoCard: {
+    margin: 16,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 14,
+  },
+  infoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  infoBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  infoName: {
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+    flexShrink: 1,
+  },
+  infoFollowers: {
     fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
+  infoCategory: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
+  infoActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  infoAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  infoActionText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
+  description: {
+    fontSize: 14,
+    lineHeight: 20,
     fontFamily: "Inter_400Regular",
   },
   empty: {

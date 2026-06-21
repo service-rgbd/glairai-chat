@@ -19,4 +19,6 @@ export interface ConversationSummary {
   unreadCount: number;
   lastMessage?: ConversationMessage;
   lastReadMessageId: string | null;
+  isArchived?: boolean;
+  isMuted?: boolean;
 }

@@ -27,7 +27,7 @@ export function collectConversationMedia(messages: GMessage[]): ConversationMedi
 
     if (message.type === "image") {
       const payload = parseImageMessagePayload(message.content);
-      if (!payload) continue;
+      if (!payload || payload.viewOnce) continue;
       const url = getDisplayMediaUrl(payload.key, payload.url);
       if (!url) continue;
       items.push({

@@ -1,11 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -20,6 +21,14 @@ import { useColors } from "@/hooks/useColors";
 const NUM_COLUMNS = 3;
 const GAP = 3;
 
+type MediaFilter = "all" | "image" | "video";
+
+const MEDIA_FILTERS: Array<{ id: MediaFilter; label: string }> = [
+  { id: "all", label: "Tous" },
+  { id: "image", label: "Photos" },
+  { id: "video", label: "Vidéos" },
+];
+
 export default function ConversationMediaScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const colors = useColors();
@@ -27,9 +36,26 @@ export default function ConversationMediaScreen() {
   const { chats, messages, loadConversationMessages } = useChats();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
+  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+
   const chat = chats.find((item) => item.id === conversationId);
   const chatMessages = conversationId ? (messages[conversationId] ?? []) : [];
-  const mediaItems = useMemo(() => collectConversationMedia(chatMessages), [chatMessages]);
+  const allMediaItems = useMemo(() => collectConversationMedia(chatMessages), [chatMessages]);
+  const mediaItems = useMemo(
+    () =>
+      mediaFilter === "all"
+        ? allMediaItems
+        : allMediaItems.filter((item) => item.type === mediaFilter),
+    [allMediaItems, mediaFilter],
+  );
+  const mediaCounts = useMemo(
+    () => ({
+      all: allMediaItems.length,
+      image: allMediaItems.filter((item) => item.type === "image").length,
+      video: allMediaItems.filter((item) => item.type === "video").length,
+    }),
+    [allMediaItems],
+  );
 
   useEffect(() => {
     if (!conversationId) return;
@@ -72,15 +98,56 @@ export default function ConversationMediaScreen() {
         </View>
       </View>
 
+      {allMediaItems.length > 0 ? (
+        <View style={[styles.filtersWrap, { borderBottomColor: colors.border }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersScroll}>
+            {MEDIA_FILTERS.map((filter) => {
+              const selected = mediaFilter === filter.id;
+              const count = mediaCounts[filter.id];
+              return (
+                <TouchableOpacity
+                  key={filter.id}
+                  style={[
+                    styles.filterChip,
+                    selected
+                      ? { backgroundColor: `${colors.primary}24`, borderColor: `${colors.primary}55` }
+                      : { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                  onPress={() => setMediaFilter(filter.id)}
+                  activeOpacity={0.82}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      { color: selected ? colors.primary : colors.mutedForeground },
+                    ]}
+                  >
+                    {filter.label}
+                    {count > 0 ? ` ${count}` : ""}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {chatMessages.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : allMediaItems.length === 0 ? (
+        <View style={styles.center}>
+          <Ionicons name="images-outline" size={42} color={colors.mutedForeground} />
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+            Aucune photo ou vidéo dans cette conversation.
+          </Text>
         </View>
       ) : mediaItems.length === 0 ? (
         <View style={styles.center}>
           <Ionicons name="images-outline" size={42} color={colors.mutedForeground} />
           <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-            Aucune photo ou vidéo dans cette conversation.
+            Aucun média dans cette catégorie.
           </Text>
         </View>
       ) : (
@@ -134,6 +201,24 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, gap: 2 },
   title: { fontSize: 18, fontFamily: "Inter_700Bold" },
   subtitle: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  filtersWrap: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 10,
+  },
+  filtersScroll: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  filterChipText: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
   center: {
     flex: 1,
     alignItems: "center",

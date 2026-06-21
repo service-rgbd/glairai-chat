@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "@/components/Avatar";
 import { ChatItem } from "@/components/ChatItem";
 import { ChatOptionsSheet } from "@/components/ChatOptionsSheet";
+import { ConversationFilterChips } from "@/components/ConversationFilterChips";
 import { GroupInviteBanner } from "@/components/GroupInviteBanner";
 import { PasswordPromptModal } from "@/components/PasswordPromptModal";
 import { SearchBar } from "@/components/SearchBar";
@@ -44,7 +45,15 @@ import {
   verifyArchivedAccessPassword,
 } from "@/lib/archived-access";
 import { openGlobalSearch } from "@/lib/navigation";
-import { openUserStories } from "@/lib/story-playback";
+import {
+  buildFilteredConversationList,
+  getConversationFilterCounts,
+  type ConversationListFilter,
+} from "@/lib/conversation-list-sections";
+import { openUserStories, groupStoriesByUser } from "@/lib/story-playback";
+import { ChannelListItem } from "@/modules/channels/components/ChannelListItem";
+import { useChannels } from "@/modules/channels/context/ChannelsContext";
+import type { Channel } from "@/modules/channels/types";
 
 const ARCHIVED_PULL_REVEAL_OFFSET = 36;
 const ARCHIVED_SCROLL_HIDE_OFFSET = 10;
@@ -69,12 +78,15 @@ export default function ChatsScreen() {
     archiveConversation,
     muteConversation,
     deleteConversation,
+    isGroupAdmin,
     pendingGroupInvites,
     acceptGroupMemberInvite,
     declineGroupMemberInvite,
     groupInviteActionId,
   } = useChats();
+  const { discoverySections } = useChannels();
   const [search, setSearch] = useState("");
+  const [listFilter, setListFilter] = useState<ConversationListFilter>("all");
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [selectedChatForActions, setSelectedChatForActions] = useState<GChat | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -124,8 +136,15 @@ export default function ChatsScreen() {
     return lb.localeCompare(la);
   });
 
-  const storyUsers = Object.values(users).filter(
-    (u) => stories.some((s) => s.userId === u.id) && !isUserBlocked(u.id),
+  const storyUsers = useMemo(
+    () =>
+      groupStoriesByUser({
+        stories,
+        users,
+        currentUserId,
+        isUserBlocked,
+      }).map((group) => group.user),
+    [stories, users, currentUserId, isUserBlocked],
   );
 
   const isBlockedDirectChat = (chat: GChat) => {
@@ -144,6 +163,53 @@ export default function ChatsScreen() {
         return name?.toLowerCase().includes(search.toLowerCase());
       })
     : activeChats;
+
+  const followedChannels = useMemo(() => {
+    const byId = new Map<string, Channel>();
+    for (const section of discoverySections) {
+      for (const channel of section.channels) {
+        if (channel.isFollowing) {
+          byId.set(channel.id, channel);
+        }
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [discoverySections]);
+
+  const getChatSortAt = useCallback(
+    (chat: GChat) =>
+      messages[chat.id]?.slice(-1)[0]?.timestamp ?? chat.lastMessage?.timestamp ?? "",
+    [messages],
+  );
+
+  const getDirectChatName = useCallback(
+    (chat: GChat) => getOtherUser(chat)?.name ?? "",
+    [getOtherUser],
+  );
+
+  const filterCounts = useMemo(
+    () =>
+      getConversationFilterCounts({
+        chats: filtered,
+        channels: followedChannels,
+        search,
+        getDirectChatName,
+      }),
+    [filtered, followedChannels, search, getDirectChatName],
+  );
+
+  const conversationListItems = useMemo(
+    () =>
+      buildFilteredConversationList({
+        chats: filtered,
+        channels: followedChannels,
+        filter: listFilter,
+        search,
+        getDirectChatName,
+        getChatSortAt,
+      }),
+    [filtered, followedChannels, listFilter, search, getDirectChatName, getChatSortAt],
+  );
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -293,9 +359,13 @@ export default function ChatsScreen() {
 
   const handleDeleteChat = (chat: GChat) => {
     const label = getChatActionLabel(chat);
+    const isOwnerDeletingGroup =
+      chat.type === "group" && isGroupAdmin(chat, currentUser?.id ?? "");
     Alert.alert(
-      "Supprimer la conversation ?",
-      `La conversation avec ${label} sera retirée de votre liste. Elle pourra réapparaître si un nouveau message arrive.`,
+      isOwnerDeletingGroup ? "Supprimer le groupe ?" : "Supprimer la conversation ?",
+      isOwnerDeletingGroup
+        ? `Le groupe « ${label} » sera supprimé pour tous les membres. Cette action est irréversible.`
+        : `La conversation avec ${label} sera retirée de votre liste. Elle pourra réapparaître si un nouveau message arrive.`,
       [
         { text: "Annuler", style: "cancel" },
         {
@@ -427,6 +497,47 @@ export default function ChatsScreen() {
         ) : null}
         {canShowArchivedContent ? archivedChats.map(renderArchivedChatItem) : null}
       </View>
+    );
+  };
+
+  const renderChatRow = (item: GChat) => {
+    const other = getOtherUser(item);
+    const lastMsg = messages[item.id]?.slice(-1)[0] ?? item.lastMessage;
+    const typingUserIds = (typingByConversation[item.id] ?? []).filter(
+      (userId) => userId !== currentUserId,
+    );
+    const typingLabel = typingUserIds.length
+      ? item.type === "group"
+        ? `${users[typingUserIds[0]!]?.name?.split(" ")[0] ?? "Quelqu'un"} écrit...`
+        : "en train d'écrire..."
+      : null;
+    const contactStories =
+      item.type === "group" || !other ? [] : stories.filter((story) => story.userId === other.id);
+
+    return (
+      <ChatItem
+        chat={item}
+        otherUser={other}
+        lastMessage={lastMsg}
+        currentUserId={currentUserId}
+        users={users}
+        typingLabel={typingLabel}
+        userStories={contactStories}
+        onStoryPress={
+          contactStories.length > 0 && other
+            ? () => {
+                openUserStories({
+                  stories,
+                  users,
+                  targetUserId: other.id,
+                  currentUserId,
+                });
+              }
+            : undefined
+        }
+        onPress={() => router.push(`/chat/${item.id}`)}
+        onLongPress={() => setSelectedChatForActions(item)}
+      />
     );
   };
 
@@ -588,6 +699,14 @@ export default function ChatsScreen() {
         autoFocus={shouldFocusSearch}
       />
 
+      {!search && !showArchived ? (
+        <ConversationFilterChips
+          activeFilter={listFilter}
+          counts={filterCounts}
+          onChange={setListFilter}
+        />
+      ) : null}
+
       {renderArchivedSection()}
 
       <GroupInviteBanner
@@ -616,8 +735,8 @@ export default function ChatsScreen() {
       />
 
       <FlatList
-        data={filtered}
-        keyExtractor={(c) => c.id}
+        data={conversationListItems}
+        keyExtractor={(row) => `${row.kind}-${row.id}`}
         scrollEnabled
         bounces
         overScrollMode="always"
@@ -625,46 +744,16 @@ export default function ChatsScreen() {
         scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: bottomPad + 96, flexGrow: 1 }}
         ListHeaderComponent={renderStoriesSection()}
-        renderItem={({ item }) => {
-          const other = getOtherUser(item);
-          const lastMsg = messages[item.id]?.slice(-1)[0] ?? item.lastMessage;
-          const typingUserIds = (typingByConversation[item.id] ?? []).filter(
-            (userId) => userId !== currentUserId,
-          );
-          const typingLabel = typingUserIds.length
-            ? item.type === "group"
-              ? `${users[typingUserIds[0]!]?.name?.split(" ")[0] ?? "Quelqu'un"} écrit...`
-              : "en train d'écrire..."
-            : null;
-          const contactStories =
-            item.type === "group" || !other
-              ? []
-              : stories.filter((story) => story.userId === other.id);
-          return (
-            <ChatItem
-              chat={item}
-              otherUser={other}
-              lastMessage={lastMsg}
-              currentUserId={currentUserId}
-              users={users}
-              typingLabel={typingLabel}
-              userStories={contactStories}
-              onStoryPress={
-                contactStories.length > 0 && other
-                  ? () => {
-                      openUserStories({
-                        stories,
-                        users,
-                        targetUserId: other.id,
-                        currentUserId,
-                      });
-                    }
-                  : undefined
-              }
-              onPress={() => router.push(`/chat/${item.id}`)}
-              onLongPress={() => setSelectedChatForActions(item)}
-            />
-          );
+        renderItem={({ item: row }) => {
+          if (row.kind === "channel") {
+            return (
+              <ChannelListItem
+                channel={row.channel}
+                onPress={() => router.push(`/channel/${row.channel.id}`)}
+              />
+            );
+          }
+          return renderChatRow(row.chat);
         }}
         ListEmptyComponent={
           <View style={styles.empty}>

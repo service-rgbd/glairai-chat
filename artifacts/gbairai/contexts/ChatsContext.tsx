@@ -26,7 +26,7 @@ import {
 } from "@workspace/api-client-react";
 import type * as ExpoContacts from "expo-contacts";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
-import { AppState, type AppStateStatus } from "react-native";
+import { Alert, AppState, type AppStateStatus } from "react-native";
 import React, {
   useCallback,
   useContext,
@@ -84,6 +84,7 @@ import {
   encodeEditedTextMessageContent,
   getMessageDisplayContent,
 } from "@/lib/message-meta";
+import { encodeViewOnceOpenedContent } from "@/lib/view-once-media";
 import { MessageSoundsBridge } from "@/components/MessageSoundsBridge";
 import { parseGroupSettings } from "@/lib/group-settings";
 import {
@@ -256,6 +257,8 @@ type RealtimeSocketEvent = {
   conversationId?: string;
   messageId?: string;
   message?: ConversationMessage;
+  userId?: string;
+  messageSenderId?: string;
   reactions?: MessageReactionSummary[];
   groupMemberInvite?: GroupMemberInvite;
   receipt?: MessageReceipt;
@@ -266,6 +269,7 @@ type RealtimeSocketEvent = {
   callerAvatarUrl?: string | null;
   callType?: "audio" | "video";
   callId?: string;
+  story?: GStory;
   presence?: {
     userId: string;
     snapshot: {
@@ -1199,6 +1203,43 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       }));
     });
 
+    socket.on("message.view_once_consumed", (event?: RealtimeSocketEvent) => {
+      if (!event?.conversationId || !event.messageId || !event.userId) {
+        return;
+      }
+      if (event.userId !== currentUser?.id) {
+        return;
+      }
+
+      const openedContent = encodeViewOnceOpenedContent("image");
+      queryClient.setQueryData<MessagesPage>(["messages", event.conversationId], (current) => ({
+        messages: (current?.messages ?? []).map((message) =>
+          message.id === event.messageId ? { ...message, content: openedContent } : message,
+        ),
+        nextCursor: current?.nextCursor ?? null,
+      }));
+    });
+
+    socket.on("message.view_once_screenshot", (event?: RealtimeSocketEvent) => {
+      if (!event?.conversationId || !event.messageId) {
+        return;
+      }
+
+      if (event.message) {
+        queryClient.setQueryData<MessagesPage>(["messages", event.conversationId], (current) => ({
+          messages: upsertConversationMessage(current?.messages ?? [], event.message!),
+          nextCursor: current?.nextCursor ?? null,
+        }));
+      }
+
+      if (event.messageSenderId === currentUser?.id) {
+        Alert.alert(
+          "Capture d'écran",
+          "Une capture d'écran a été effectuée sur votre photo à vue unique.",
+        );
+      }
+    });
+
     socket.on("message.reaction", (event?: RealtimeSocketEvent) => {
       if (!event?.conversationId || !event.messageId || !event.reactions) {
         return;
@@ -1248,6 +1289,17 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           event.conversation!,
         ),
       }));
+    });
+    socket.on("conversation.deleted", (event?: RealtimeSocketEvent) => {
+      if (!event?.conversationId) return;
+
+      queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+        conversations: (current?.conversations ?? []).filter(
+          (conversation) => conversation.id !== event.conversationId,
+        ),
+      }));
+      queryClient.removeQueries({ queryKey: ["messages", event.conversationId] });
+      setLoadedConversationIds((prev) => prev.filter((id) => id !== event.conversationId));
     });
     socket.on("group.member_invited", (event?: RealtimeSocketEvent) => {
       if (!event?.groupMemberInvite) return;
@@ -1305,6 +1357,18 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           conversations: patchParticipantPresence(current.conversations, userId, snapshot),
         };
       });
+    });
+    socket.on("story.created", (event?: RealtimeSocketEvent) => {
+      if (event?.story) {
+        queryClient.setQueryData<{ stories: GStory[] }>(["stories"], (current) => {
+          const existing = current?.stories ?? [];
+          if (existing.some((story) => story.id === event.story!.id)) {
+            return current ?? { stories: existing };
+          }
+          return { stories: [event.story!, ...existing] };
+        });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["stories"] });
     });
     socket.on("call.invited", (event?: RealtimeSocketEvent) => {
       if (
@@ -1480,6 +1544,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
     const poll = setInterval(() => {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["stories"] });
       for (const chatId of loadedConversationIdsRef.current) {
         void queryClient.invalidateQueries({ queryKey: ["messages", chatId] });
       }
@@ -1765,8 +1830,38 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
+    for (const story of storiesQuery.data?.stories ?? []) {
+      if (nextUsers[story.userId]) {
+        continue;
+      }
+      const contact = composeContactsSnapshot.find((item) => item.userId === story.userId);
+      nextUsers[story.userId] = contact?.userId
+        ? {
+            id: contact.userId,
+            name: contact.name,
+            phone: contact.phone,
+            avatar: contact.avatar,
+            bio: contact.bio,
+            status: contact.status,
+            lastSeen: contact.lastSeen,
+            initials: contact.initials,
+            color: contact.color,
+          }
+        : {
+            id: story.userId,
+            name: "Contact",
+            phone: "",
+            avatar: null,
+            bio: "",
+            status: "",
+            lastSeen: null,
+            initials: "?",
+            color: "#6D4AFF",
+          };
+    }
+
     return isAuthenticated ? nextUsers : { ...MOCK_USERS, ...nextUsers };
-  }, [composeContactsSnapshot, conversationSummaries, currentUser, isAuthenticated]);
+  }, [composeContactsSnapshot, conversationSummaries, currentUser, isAuthenticated, storiesQuery.data?.stories]);
 
   const toMessageStatus = (
     message: ConversationMessage,
@@ -2140,7 +2235,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
   const sendImageMessage = (
     chatId: string,
-    payload: { url: string; key: string; mimeType: string; width?: number; height?: number },
+    payload: { url: string; key: string; mimeType: string; width?: number; height?: number; viewOnce?: boolean },
   ) => {
     const serialized = encodeImageMessagePayload(payload);
     const queuedPayload = {
@@ -2337,6 +2432,47 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const consumeViewOnceMessage = useCallback(async (chatId: string, messageId: string) => {
+    const openedContent = encodeViewOnceOpenedContent("image");
+    queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
+      messages: (current?.messages ?? []).map((message) =>
+        message.id === messageId ? { ...message, content: openedContent } : message,
+      ),
+      nextCursor: current?.nextCursor ?? null,
+    }));
+
+    try {
+      const updatedMessage = await customFetch<ConversationMessage>(
+        `/api/messages/${messageId}/view-once/consume`,
+        { method: "POST" },
+      );
+      queryClient.setQueryData<MessagesPage>(["messages", chatId], (current) => ({
+        messages: upsertConversationMessage(current?.messages ?? [], updatedMessage),
+        nextCursor: current?.nextCursor ?? null,
+      }));
+      queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+        conversations: updateConversationSummaryWithEditedMessage(
+          current?.conversations ?? [],
+          updatedMessage,
+        ),
+      }));
+      await persistMessagesToLocalDb(chatId, [updatedMessage]);
+    } catch {
+      // La mise à jour optimiste reste affichée si l'API échoue déjà.
+    }
+  }, [queryClient]);
+
+  const reportViewOnceScreenshot = useCallback(async (chatId: string, messageId: string) => {
+    try {
+      await customFetch<{ messageId: string; conversationId: string }>(
+        `/api/messages/${messageId}/view-once/screenshot`,
+        { method: "POST" },
+      );
+    } catch {
+      // Ignorer les doublons ou erreurs réseau.
+    }
+  }, []);
+
   const editMessage = async (chatId: string, messageId: string, content: string) => {
     const previousMessages = queryClient.getQueryData<MessagesPage>(["messages", chatId]);
     const trimmed = content.trim();
@@ -2521,7 +2657,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             backgroundColor: draft.backgroundColor || "#6D4AFF",
           }),
         });
-        await queryClient.invalidateQueries({ queryKey: ["stories"] });
+        await queryClient.refetchQueries({ queryKey: ["stories"] });
         return;
       }
 
@@ -2603,7 +2739,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           backgroundColor: draft.backgroundColor || "#0F172A",
         }),
       });
-      await queryClient.invalidateQueries({ queryKey: ["stories"] });
+      await queryClient.refetchQueries({ queryKey: ["stories"] });
       return;
     }
 
@@ -2882,6 +3018,13 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     },
     [currentUser?.countryCode],
   );
+
+  useEffect(() => {
+    if (!isAuthenticated || !localStorageReady) {
+      return;
+    }
+    void getComposeContacts();
+  }, [getComposeContacts, isAuthenticated, localStorageReady]);
 
   const updateSavedContactName = async (phone: string, contactName: string) => {
     await customFetch(`/api/contacts/${encodeURIComponent(phone)}`, {
@@ -3222,6 +3365,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         sendImageMessage,
         sendVideoMessage,
         deleteMessage,
+        consumeViewOnceMessage,
+        reportViewOnceScreenshot,
         editMessage,
         setTypingState,
         markChatAsRead,

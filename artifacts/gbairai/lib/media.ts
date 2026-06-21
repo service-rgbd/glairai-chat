@@ -1,6 +1,9 @@
 import { getApiBaseUrl } from "./api-config";
-import { File } from "expo-file-system";
+import { File, Paths } from "expo-file-system";
+import { copyAsync } from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
 import * as VideoThumbnails from "expo-video-thumbnails";
+import { Platform } from "react-native";
 import type { UploadPhase } from "./upload-status";
 
 function buildMediaProxyUrl(key: string) {
@@ -43,6 +46,7 @@ export interface ImageMessagePayload {
   mimeType: string;
   width?: number;
   height?: number;
+  viewOnce?: boolean;
 }
 
 export interface VideoMessagePayload {
@@ -52,6 +56,7 @@ export interface VideoMessagePayload {
   durationSeconds?: number;
   thumbnailKey?: string;
   thumbnailUrl?: string;
+  viewOnce?: boolean;
 }
 
 export interface StoryMediaPayload {
@@ -88,7 +93,71 @@ export function getDisplayMediaUrl(key: string, url?: string | null) {
   if (url && url.trim()) {
     return url;
   }
+  if (/^(https?:|file:|blob:|data:)/i.test(key)) {
+    return key;
+  }
   return buildMediaProxyUrl(key);
+}
+
+function stripUriFragment(uri: string) {
+  const hashIndex = uri.indexOf("#");
+  return hashIndex >= 0 ? uri.slice(0, hashIndex) : uri;
+}
+
+function extensionFromMimeType(mimeType: string) {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes("quicktime")) return ".mov";
+  if (normalized.includes("mp4") || normalized.includes("mpeg")) return ".mp4";
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return ".jpg";
+  if (normalized.includes("png")) return ".png";
+  if (normalized.includes("webp")) return ".webp";
+  return ".bin";
+}
+
+function isPreparedUploadUri(uri: string) {
+  return uri.includes("/upload-") && uri.startsWith(Paths.cache.uri);
+}
+
+async function resolveReadableSourceUri(sourceUri: string, assetId?: string | null) {
+  let readableUri = stripUriFragment(sourceUri);
+
+  if (Platform.OS === "ios" && assetId) {
+    try {
+      const assetInfo = await MediaLibrary.getAssetInfoAsync(assetId, {
+        shouldDownloadFromNetwork: true,
+      });
+      if (assetInfo.localUri) {
+        readableUri = stripUriFragment(assetInfo.localUri);
+      }
+    } catch {
+      // On continue avec l'URI fournie par le picker.
+    }
+  }
+
+  return readableUri;
+}
+
+/** Copie un média de la photothèque iOS vers le cache app (lecture sandbox). */
+export async function prepareLocalMediaUriForUpload(
+  sourceUri: string,
+  mimeType: string,
+  assetId?: string | null,
+) {
+  if (isPreparedUploadUri(sourceUri)) {
+    return sourceUri;
+  }
+
+  const readableUri = await resolveReadableSourceUri(sourceUri, assetId);
+  const destination = new File(Paths.cache, `upload-${Date.now()}${extensionFromMimeType(mimeType)}`);
+
+  if (Platform.OS === "ios") {
+    await copyAsync({ from: readableUri, to: destination.uri });
+    return destination.uri;
+  }
+
+  const source = new File(readableUri);
+  source.copy(destination);
+  return destination.uri;
 }
 
 export async function createAudioUploadTarget(authToken: string, mimeType: string) {
@@ -157,8 +226,10 @@ export async function uploadFileToSignedUrl(
   uploadUrl: string,
   fileUri: string,
   mimeType: string,
+  assetId?: string | null,
 ) {
-  const file = new File(fileUri);
+  const readableUri = await prepareLocalMediaUriForUpload(fileUri, mimeType, assetId);
+  const file = new File(readableUri);
   const buffer = await file.arrayBuffer();
   const uploadResponse = await fetch(uploadUrl, {
     method: "PUT",
@@ -175,7 +246,8 @@ export async function uploadFileToSignedUrl(
 }
 
 export async function generateVideoThumbnailUri(videoUri: string) {
-  const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
+  const readableUri = stripUriFragment(videoUri);
+  const { uri } = await VideoThumbnails.getThumbnailAsync(readableUri, {
     time: 0,
     quality: 0.72,
   });
@@ -188,12 +260,20 @@ export async function uploadChatVideoWithThumbnail(
     videoUri: string;
     videoMimeType: string;
     conversationId: string;
+    thumbnailUri?: string;
+    assetId?: string | null;
     onPhase?: (phase: UploadPhase) => void;
   },
 ) {
   input.onPhase?.("preparing");
 
-  const thumbnailUri = await generateVideoThumbnailUri(input.videoUri);
+  const videoUri = await prepareLocalMediaUriForUpload(
+    input.videoUri,
+    input.videoMimeType,
+    input.assetId,
+  );
+  const thumbnailUri =
+    input.thumbnailUri ?? (await generateVideoThumbnailUri(videoUri));
   const videoTarget = await createMediaUploadTarget(authToken, {
     category: "chat-video",
     mimeType: input.videoMimeType,
@@ -206,7 +286,7 @@ export async function uploadChatVideoWithThumbnail(
   });
 
   input.onPhase?.("uploading");
-  await uploadFileToSignedUrl(videoTarget.uploadUrl, input.videoUri, input.videoMimeType);
+  await uploadFileToSignedUrl(videoTarget.uploadUrl, videoUri, input.videoMimeType);
   await uploadFileToSignedUrl(thumbnailTarget.uploadUrl, thumbnailUri, "image/jpeg");
 
   input.onPhase?.("finalizing");
@@ -226,6 +306,7 @@ export async function uploadStoryMediaWithThumbnail(
     mediaUri: string;
     mimeType: string;
     type: "image" | "video";
+    assetId?: string | null;
     onPhase?: (phase: UploadPhase) => void;
   },
 ) {
@@ -237,11 +318,16 @@ export async function uploadStoryMediaWithThumbnail(
   });
 
   input.onPhase?.("uploading");
-  await uploadFileToSignedUrl(target.uploadUrl, input.mediaUri, input.mimeType);
+  const mediaUri = await prepareLocalMediaUriForUpload(
+    input.mediaUri,
+    input.mimeType,
+    input.assetId,
+  );
+  await uploadFileToSignedUrl(target.uploadUrl, mediaUri, input.mimeType);
 
   let thumbnailUrl: string | undefined;
   if (input.type === "video") {
-    const thumbnailUri = await generateVideoThumbnailUri(input.mediaUri);
+    const thumbnailUri = await generateVideoThumbnailUri(mediaUri);
     const thumbnailTarget = await createMediaUploadTarget(authToken, {
       category: "story-image",
       mimeType: "image/jpeg",
@@ -291,7 +377,10 @@ export function encodeImageMessagePayload(payload: ImageMessagePayload) {
 
 export function parseImageMessagePayload(content: string): ImageMessagePayload | null {
   try {
-    const parsed = JSON.parse(content) as Partial<ImageMessagePayload>;
+    const parsed = JSON.parse(content) as Partial<ImageMessagePayload> & { kind?: string };
+    if (parsed?.kind === "view_once_opened" || parsed?.kind === "deleted") {
+      return null;
+    }
     if (
       typeof parsed?.key !== "string" ||
       typeof parsed?.mimeType !== "string"
@@ -304,6 +393,7 @@ export function parseImageMessagePayload(content: string): ImageMessagePayload |
       mimeType: parsed.mimeType,
       width: typeof parsed.width === "number" ? parsed.width : undefined,
       height: typeof parsed.height === "number" ? parsed.height : undefined,
+      viewOnce: parsed.viewOnce === true ? true : undefined,
     };
   } catch {
     return null;
@@ -316,7 +406,10 @@ export function encodeVideoMessagePayload(payload: VideoMessagePayload) {
 
 export function parseVideoMessagePayload(content: string): VideoMessagePayload | null {
   try {
-    const parsed = JSON.parse(content) as Partial<VideoMessagePayload>;
+    const parsed = JSON.parse(content) as Partial<VideoMessagePayload> & { kind?: string };
+    if (parsed?.kind === "view_once_opened" || parsed?.kind === "deleted") {
+      return null;
+    }
     if (
       typeof parsed?.key !== "string" ||
       typeof parsed?.mimeType !== "string"
@@ -331,6 +424,7 @@ export function parseVideoMessagePayload(content: string): VideoMessagePayload |
         typeof parsed.durationSeconds === "number" ? parsed.durationSeconds : undefined,
       thumbnailKey: typeof parsed.thumbnailKey === "string" ? parsed.thumbnailKey : undefined,
       thumbnailUrl: typeof parsed.thumbnailUrl === "string" ? parsed.thumbnailUrl : undefined,
+      viewOnce: parsed.viewOnce === true ? true : undefined,
     };
   } catch {
     return null;

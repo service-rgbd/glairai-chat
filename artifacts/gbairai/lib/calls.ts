@@ -13,7 +13,7 @@ export class CallRequestError extends Error {
 }
 
 export type CallRole = "caller" | "callee";
-export type CallSignalAction = "cancel" | "decline" | "end";
+export type CallSignalAction = "cancel" | "decline" | "end" | "leave";
 
 export type CallSignalMeta = {
   conversationId: string;

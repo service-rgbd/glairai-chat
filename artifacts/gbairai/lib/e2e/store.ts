@@ -1,4 +1,6 @@
-import { safeGetItem, safeSetItem } from "@/lib/safe-storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { safeGetItem, safeRemoveItem, safeSetItem } from "@/lib/safe-storage";
 import type { StoredDeviceKeys, StoredSession } from "@/lib/e2e/types";
 
 const DEVICE_ID_KEY = "@gbairai/e2e/device-id";
@@ -56,6 +58,24 @@ export async function saveSession(userId: string, session: StoredSession) {
   await safeSetItem(sessionKey(userId, session.peerUserId), JSON.stringify(session));
 }
 
+export async function deleteSession(userId: string, peerUserId: string) {
+  await safeRemoveItem(sessionKey(userId, peerUserId));
+}
+
+export async function clearAllSessionsForUser(userId: string) {
+  const prefix = `${SESSION_PREFIX}${userId}:`;
+  try {
+    const allKeys = await AsyncStorage.getAllKeys();
+    const sessionKeys = allKeys.filter((key) => key.startsWith(prefix));
+    if (sessionKeys.length) {
+      await AsyncStorage.multiRemove(sessionKeys);
+    }
+  } catch {
+    // Ignoré — les sessions obsolètes seront recréées au prochain handshake.
+  }
+}
+
 export async function clearE2eStoreForUser(userId: string) {
   await safeSetItem(deviceKeysKey(userId), "");
+  await clearAllSessionsForUser(userId);
 }

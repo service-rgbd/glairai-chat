@@ -17,18 +17,54 @@ function latestStoryTime(stories: GStory[]) {
   return Math.max(...stories.map((story) => new Date(story.createdAt).getTime()));
 }
 
+function fallbackStoryUser(userId: string): GUser {
+  return {
+    id: userId,
+    name: "Contact",
+    phone: "",
+    avatar: null,
+    bio: "",
+    status: "",
+    lastSeen: null,
+    initials: "?",
+    color: "#6D4AFF",
+  };
+}
+
+export function groupStoriesByUser(options: {
+  stories: GStory[];
+  users: Record<string, GUser>;
+  currentUserId: string;
+  isUserBlocked?: (userId: string) => boolean;
+}) {
+  const { stories, users, currentUserId, isUserBlocked } = options;
+  const byUserId = new Map<string, GStory[]>();
+
+  for (const story of stories) {
+    if (story.userId === currentUserId) continue;
+    if (isUserBlocked?.(story.userId)) continue;
+    const list = byUserId.get(story.userId) ?? [];
+    list.push(story);
+    byUserId.set(story.userId, list);
+  }
+
+  return Array.from(byUserId.entries())
+    .map(([userId, userStories]) => ({
+      user: users[userId] ?? fallbackStoryUser(userId),
+      stories: sortStoriesChronologically(userStories),
+    }))
+    .sort((left, right) => latestStoryTime(right.stories) - latestStoryTime(left.stories));
+}
+
 export function buildStoryViewerQueue(
   stories: GStory[],
   users: Record<string, GUser>,
   currentUserId: string,
 ) {
-  const groups = Object.values(users)
-    .filter((user) => user.id !== currentUserId)
-    .map((user) => ({
-      userId: user.id,
-      stories: stories.filter((story) => story.userId === user.id),
-    }))
-    .filter((group) => group.stories.length > 0);
+  const groups = groupStoriesByUser({ stories, users, currentUserId }).map((group) => ({
+    userId: group.user.id,
+    stories: group.stories,
+  }));
 
   const recent = groups
     .filter((group) => group.stories.some((story) => !story.viewerIds.includes(currentUserId)))

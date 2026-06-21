@@ -18,6 +18,7 @@ import {
   followChannel,
   reactToChannelPost,
   recordChannelPostView,
+  reportChannel,
   unfollowChannel,
   updateChannel,
 } from "../api";
@@ -42,6 +43,7 @@ type ChannelsContextValue = {
   unfollow: typeof unfollowChannel;
   publishPost: typeof createChannelPost;
   reactToPost: typeof reactToChannelPost;
+  reportChannel: typeof reportChannel;
   recordView: typeof recordChannelPostView;
   removePost: typeof deleteChannelPost;
 };
@@ -100,6 +102,9 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       socket.on("channel.post.deleted", () => {
         void queryClient.invalidateQueries({ queryKey: ["channels", "feed"] });
       });
+      socket.on("channel.post.reacted", () => {
+        void queryClient.invalidateQueries({ queryKey: ["channels", "feed"] });
+      });
     })();
 
     return () => {
@@ -153,6 +158,7 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       unfollow: unfollowChannel,
       publishPost: createChannelPost,
       reactToPost: reactToChannelPost,
+      reportChannel,
       recordView: recordChannelPostView,
       removePost: deleteChannelPost,
     }),

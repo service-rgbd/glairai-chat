@@ -27,7 +27,6 @@ export function resetContactsPermissionState() {
 
 export function markContactsPermissionDenied() {
   syncState.permissionDenied = true;
-  markContactsSynced();
 }
 
 export function isContactsPermissionDenied() {

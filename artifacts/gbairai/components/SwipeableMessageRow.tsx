@@ -27,9 +27,9 @@ export function SwipeableMessageRow({ children, enabled = true, onReply }: Props
   onReplyRef.current = onReply;
 
   const onGestureEvent = (event: PanGestureHandlerGestureEvent) => {
-    const next = Math.max(0, Math.min(event.nativeEvent.translationX, MAX_SWIPE));
+    const next = Math.min(0, Math.max(event.nativeEvent.translationX, -MAX_SWIPE));
     translateX.setValue(next);
-    if (!triggered.current && next >= SWIPE_REPLY_THRESHOLD) {
+    if (!triggered.current && next <= -SWIPE_REPLY_THRESHOLD) {
       triggered.current = true;
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       onReplyRef.current();
@@ -50,14 +50,14 @@ export function SwipeableMessageRow({ children, enabled = true, onReply }: Props
   };
 
   const iconOpacity = translateX.interpolate({
-    inputRange: [0, SWIPE_REPLY_THRESHOLD],
-    outputRange: [0, 1],
+    inputRange: [-SWIPE_REPLY_THRESHOLD, 0],
+    outputRange: [1, 0],
     extrapolate: "clamp",
   });
 
   const iconScale = translateX.interpolate({
-    inputRange: [0, SWIPE_REPLY_THRESHOLD],
-    outputRange: [0.85, 1],
+    inputRange: [-SWIPE_REPLY_THRESHOLD, 0],
+    outputRange: [1, 0.85],
     extrapolate: "clamp",
   });
 
@@ -83,7 +83,7 @@ export function SwipeableMessageRow({ children, enabled = true, onReply }: Props
       </Animated.View>
       <PanGestureHandler
         enabled={enabled}
-        activeOffsetX={12}
+        activeOffsetX={[-12, 10000]}
         failOffsetY={[-12, 12]}
         onGestureEvent={onGestureEvent}
         onHandlerStateChange={onHandlerStateChange}
@@ -101,7 +101,7 @@ const styles = StyleSheet.create({
   },
   replyIcon: {
     position: "absolute",
-    left: 8,
+    right: 8,
     width: 28,
     height: 28,
     alignItems: "center",

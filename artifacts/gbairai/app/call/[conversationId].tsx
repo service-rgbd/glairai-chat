@@ -31,7 +31,7 @@ import {
   type CallSignalMeta,
   type PreparedCallSession,
 } from "@/lib/calls";
-import { clearIncomingCallIfMatches } from "@/lib/incoming-call";
+import { clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
 import { assertCanStartCall, setActiveCall } from "@/lib/call-session-client";
 import { endNativeCall } from "@/lib/call-system-ui";
 import {
@@ -112,6 +112,10 @@ export default function CallScreen() {
   const normalizedCallId = Array.isArray(callId) ? callId[0] : callId;
   const normalizedCallSessionId = Array.isArray(callSessionId) ? callSessionId[0] : callSessionId;
   const nativeCallsEnabled = isNativeCallSupported();
+  const isCallInitiator = session?.role === "caller" || (!session && !isIncoming);
+  const liveKitActive = Boolean(session && nativeCallsEnabled && !isLoading && !error);
+  const hangupActionLabel =
+    isGroupCall && soundPhase === "connected" && !isCallInitiator ? "Quitter" : "Raccrocher";
 
   const finishCall = useCallback(
     (options?: {
@@ -171,12 +175,15 @@ export default function CallScreen() {
 
   const hangup = useCallback(async () => {
     const callSessionId = activeCallSessionIdRef.current;
-    const callerUserId = isIncoming ? otherUser?.id : currentUser?.id;
+    const callerUserId = isIncoming
+      ? (getIncomingCall()?.callerUserId ?? otherUser?.id)
+      : currentUser?.id;
     const durationSeconds =
       connectedAtRef.current != null
         ? Math.max(0, Math.floor((Date.now() - connectedAtRef.current) / 1000))
         : null;
     const wasConnected = wasConnectedRef.current;
+    const shouldLeaveGroupCall = isGroupCall && wasConnected && !isCallInitiator;
     const outcome = resolveCallLogOutcome({
       isIncoming,
       wasConnected,
@@ -194,7 +201,9 @@ export default function CallScreen() {
 
     if (authToken && callSessionId) {
       try {
-        if (wasConnected) {
+        if (shouldLeaveGroupCall) {
+          await signalConversationCall(callSessionId, "leave", authToken, meta);
+        } else if (wasConnected) {
           await signalConversationCall(callSessionId, "end", authToken, meta);
         } else if (isIncoming) {
           await signalConversationCall(callSessionId, "decline", authToken, meta);
@@ -205,7 +214,7 @@ export default function CallScreen() {
         // Local hangup still proceeds.
       }
 
-      if (meta) {
+      if (meta && !shouldLeaveGroupCall) {
         try {
           await logConversationCall(
             {
@@ -227,9 +236,19 @@ export default function CallScreen() {
     finishCall({
       missed: isIncoming && !wasConnected,
       failed: false,
-      suggestVoiceMessage: !isIncoming && !wasConnected,
+      suggestVoiceMessage: !isIncoming && !wasConnected && !isGroupCall,
     });
-  }, [authToken, callType, conversationId, currentUser?.id, finishCall, isIncoming, otherUser?.id]);
+  }, [
+    authToken,
+    callType,
+    conversationId,
+    currentUser?.id,
+    finishCall,
+    isCallInitiator,
+    isGroupCall,
+    isIncoming,
+    otherUser?.id,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -392,7 +411,7 @@ export default function CallScreen() {
   }, [hangup, isIncoming, soundPhase]);
 
   const handleLiveKitConnected = useCallback(() => {
-    // La sonnerie sortante continue jusqu'à ce que le distant décroche (signal answered / remoteJoined).
+    // LiveKit prend la session audio : CallSoundController est démonté via liveKitActive.
   }, []);
 
   const handleRemoteJoined = useCallback(() => {
@@ -407,6 +426,7 @@ export default function CallScreen() {
   }, []);
 
   const handleRemoteLeft = useCallback(() => {
+    if (isGroupCall) return;
     if (!wasConnectedRef.current || hangupRef.current) return;
     if (remoteLeftTimerRef.current) return;
     // 30 s de grâce : une coupure réseau transitoire (ping timeout) fait
@@ -417,7 +437,7 @@ export default function CallScreen() {
       remoteLeftTimerRef.current = null;
       void hangup();
     }, 30_000);
-  }, [hangup]);
+  }, [hangup, isGroupCall]);
 
   useEffect(() => {
     return () => {
@@ -430,7 +450,7 @@ export default function CallScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      {!isIncoming && soundPhase !== "idle" ? (
+      {!isIncoming && !liveKitActive && soundPhase !== "idle" ? (
         <CallSoundController phase={soundPhase} variant="outgoing" />
       ) : null}
       <View style={[styles.header, { paddingTop: topPad + 8 }]}>
@@ -456,10 +476,29 @@ export default function CallScreen() {
 
       {isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={[styles.helper, { color: colors.mutedForeground }]}>
-            Connexion à LiveKit...
+          <View style={styles.loadingAvatarWrap}>
+            <Avatar
+              uri={callDisplayAvatar}
+              initials={callDisplayInitials}
+              color={callDisplayColor}
+              size={112}
+            />
+            <View style={[styles.loadingPulse, { borderColor: colors.primary }]} />
+          </View>
+          <Text style={[styles.title, { color: colors.text }]}>
+            {callDisplayName}
           </Text>
+          <ActivityIndicator color={colors.primary} size="small" />
+          <Text style={[styles.helper, { color: colors.mutedForeground }]}>
+            Préparation de l’appel sécurisé…
+          </Text>
+          <TouchableOpacity
+            style={[styles.hangupFallback, { backgroundColor: colors.destructive }]}
+            onPress={() => void hangup()}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.hangupFallbackText}>{hangupActionLabel}</Text>
+          </TouchableOpacity>
         </View>
       ) : error ? (
         <View style={styles.center}>
@@ -494,6 +533,7 @@ export default function CallScreen() {
           }}
           onDisconnected={() => void hangup()}
           onError={(message) => setError(message)}
+          hangupLabel={hangupActionLabel}
         />
       ) : (
         <View style={styles.center}>
@@ -512,12 +552,12 @@ export default function CallScreen() {
                 ? "Connexion à l'appel..."
                 : "Sonnerie en cours..."
               : isExpoGoRuntime()
-                ? "Les appels audio/vidéo nécessitent un dev build EAS (LiveKit). Expo Go ne supporte pas WebRTC."
-                : "LiveKit est configuré côté serveur. Installez un dev build iOS/Android pour activer audio/vidéo."}
+                ? "Les appels audio/vidéo nécessitent un dev build EAS. Expo Go ne supporte pas les appels natifs."
+                : "Les appels natifs sont prêts. Installez un dev build iOS/Android pour activer l'audio/vidéo."}
           </Text>
           {session ? (
             <Text style={[styles.helper, { color: colors.mutedForeground }]}>
-              Salle prête : {session.roomName}
+              Salle d’appel prête
             </Text>
           ) : null}
           <TouchableOpacity
@@ -525,7 +565,7 @@ export default function CallScreen() {
             onPress={() => void hangup()}
             activeOpacity={0.85}
           >
-            <Text style={styles.hangupFallbackText}>Raccrocher</Text>
+            <Text style={styles.hangupFallbackText}>{hangupActionLabel}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -563,6 +603,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 28,
     gap: 12,
+  },
+  loadingAvatarWrap: {
+    width: 132,
+    height: 132,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingPulse: {
+    position: "absolute",
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    borderWidth: 2,
+    opacity: 0.3,
   },
   title: {
     fontSize: 24,

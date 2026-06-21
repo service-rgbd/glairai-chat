@@ -75,6 +75,7 @@ export default function CreateChannelScreen() {
         asset.uri,
         asset.mimeType ?? "image/jpeg",
         "avatar",
+        asset.assetId,
       );
       setAvatarUri(uploadedUrl);
     } catch (uploadError) {

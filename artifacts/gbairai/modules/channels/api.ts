@@ -91,6 +91,13 @@ export async function reactToChannelPost(postId: string, emoji: string) {
   });
 }
 
+export async function reportChannel(channelId: string, reason?: string) {
+  return customFetch<{ success: boolean }>(`/api/channels/${channelId}/report`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export async function recordChannelPostView(postId: string) {
   return customFetch<{ viewsCount: number; recorded: boolean }>(`/api/posts/${postId}/views`, {
     method: "POST",
