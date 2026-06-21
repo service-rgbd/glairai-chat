@@ -237,6 +237,41 @@ export const messageReactionsTable = pgTable(
   }),
 );
 
+export const messageViewOnceOpensTable = pgTable(
+  "message_view_once_opens",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messagesTable.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.messageId, table.userId] }),
+    messageIdx: index("message_view_once_opens_message_idx").on(table.messageId),
+    userIdx: index("message_view_once_opens_user_idx").on(table.userId),
+  }),
+);
+
+export const messageViewOnceScreenshotsTable = pgTable(
+  "message_view_once_screenshots",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messagesTable.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.messageId, table.userId] }),
+    messageIdx: index("message_view_once_screenshots_message_idx").on(table.messageId),
+  }),
+);
+
 export const deviceTokensTable = pgTable("device_tokens", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -436,6 +471,7 @@ export const messageRelations = relations(messagesTable, ({ many, one }) => ({
   }),
   receipts: many(messageReceiptsTable),
   reactions: many(messageReactionsTable),
+  viewOnceOpens: many(messageViewOnceOpensTable),
 }));
 
 export const messageReceiptRelations = relations(messageReceiptsTable, ({ one }) => ({
@@ -456,6 +492,17 @@ export const messageReactionRelations = relations(messageReactionsTable, ({ one 
   }),
   user: one(usersTable, {
     fields: [messageReactionsTable.userId],
+    references: [usersTable.id],
+  }),
+}));
+
+export const messageViewOnceOpenRelations = relations(messageViewOnceOpensTable, ({ one }) => ({
+  message: one(messagesTable, {
+    fields: [messageViewOnceOpensTable.messageId],
+    references: [messagesTable.id],
+  }),
+  user: one(usersTable, {
+    fields: [messageViewOnceOpensTable.userId],
     references: [usersTable.id],
   }),
 }));

@@ -368,6 +368,44 @@ router.post(
   },
 );
 
+router.post(
+  "/messages/:messageId/view-once/screenshot",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const result = await chatService.reportViewOnceScreenshot(
+        req.authToken!,
+        getSingleParam(req.params["messageId"]),
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error ? error.message : "Impossible de signaler la capture d'écran",
+      });
+    }
+  },
+);
+
+router.post(
+  "/messages/:messageId/view-once/consume",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const result = await chatService.consumeViewOnceMessage(
+        req.authToken!,
+        getSingleParam(req.params["messageId"]),
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        message:
+          error instanceof Error ? error.message : "Impossible d'ouvrir cette photo",
+      });
+    }
+  },
+);
+
 router.delete(
   "/messages/:messageId",
   requireAuth,

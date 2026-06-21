@@ -9,6 +9,12 @@ import {
   isDeletedMessageContent,
 } from "./message-meta";
 import {
+  encodeViewOnceOpenedContent,
+  isViewOnceImageContent,
+  isViewOnceOpenedContent,
+  parseViewOnceOpenedContent,
+} from "./view-once-media";
+import {
   contactEdgesTable,
   conversationMemberInvitesTable,
   conversationMembersTable,
@@ -19,6 +25,8 @@ import {
   hasDatabase,
   messageReceiptsTable,
   messageReactionsTable,
+  messageViewOnceOpensTable,
+  messageViewOnceScreenshotsTable,
   messagesTable,
   otpCodesTable,
   sessionsTable,
@@ -145,6 +153,8 @@ export interface RealtimeEvent {
     | "message.created"
     | "message.deleted"
     | "message.updated"
+    | "message.view_once_consumed"
+    | "message.view_once_screenshot"
     | "message.reaction"
     | "message.receipt"
     | "presence.updated"
@@ -158,12 +168,15 @@ export interface RealtimeEvent {
     | "call.cancelled"
     | "call.declined"
     | "call.ended"
-    | "call.missed";
+    | "call.missed"
+    | "story.created";
   participantIds: string[];
   conversationId?: string;
   callId?: string;
   messageId?: string;
   message?: ConversationMessage;
+  userId?: string;
+  messageSenderId?: string;
   reactions?: MessageReactionSummary[];
   receipt?: MessageReceipt;
   presence?: { userId: string; snapshot: PresenceSnapshot };
@@ -174,6 +187,7 @@ export interface RealtimeEvent {
   callerName?: string;
   callerAvatarUrl?: string | null;
   callType?: "audio" | "video";
+  story?: StorySummary;
 }
 
 export interface GroupInvite {
@@ -272,6 +286,11 @@ export interface ChatService {
     authenticatedUserId?: string,
   ): Awaitable<ConversationMessage>;
   deleteConversationMessage(token: string, messageId: string): Awaitable<ConversationMessage>;
+  consumeViewOnceMessage(token: string, messageId: string): Awaitable<ConversationMessage>;
+  reportViewOnceScreenshot(
+    token: string,
+    messageId: string,
+  ): Awaitable<{ messageId: string; conversationId: string }>;
   updateConversationMessage(
     token: string,
     messageId: string,
@@ -2822,6 +2841,194 @@ class DatabaseChatService implements ChatService {
     return fullMessage;
   }
 
+  async consumeViewOnceMessage(token: string, messageId: string) {
+    const user = await this.requireUserByToken(token);
+    const [message] = await db!
+      .select()
+      .from(messagesTable)
+      .where(eq(messagesTable.id, messageId))
+      .limit(1);
+
+    if (!message) {
+      throw new Error("Message introuvable");
+    }
+
+    await this.requireConversationMembership(message.conversationId, user.id);
+
+    if (message.type !== "image") {
+      throw new Error("Ce message n'est pas une photo");
+    }
+
+    if (isViewOnceOpenedContent(message.content)) {
+      return this.toMessage(message.conversationId, message.id, user.id);
+    }
+
+    if (!isViewOnceImageContent(message.content)) {
+      throw new Error("Ce message n'est pas une photo à vue unique");
+    }
+
+    if (message.senderId === user.id) {
+      throw new Error("L'expéditeur ne peut pas ouvrir sa propre photo à vue unique");
+    }
+
+    await db!
+      .insert(messageViewOnceOpensTable)
+      .values({
+        messageId: message.id,
+        userId: user.id,
+        openedAt: new Date(),
+      })
+      .onConflictDoNothing();
+
+    const [conversation] = await db!
+      .select({ type: conversationsTable.type })
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, message.conversationId))
+      .limit(1);
+
+    const participantIds = await this.getConversationParticipantIds(message.conversationId);
+
+    if (conversation?.type === "direct") {
+      const screenshotted = await this.hasViewOnceScreenshot(message.id);
+      await db!
+        .update(messagesTable)
+        .set({
+          content: encodeViewOnceOpenedContent("image", { screenshotted }),
+        })
+        .where(eq(messagesTable.id, message.id));
+
+      const fullMessage = await this.toMessage(message.conversationId, message.id, user.id);
+      this.publish({
+        type: "message.updated",
+        participantIds,
+        conversationId: message.conversationId,
+        message: fullMessage,
+      });
+      return fullMessage;
+    }
+
+    const fullMessage = await this.toMessage(message.conversationId, message.id, user.id);
+    this.publish({
+      type: "message.view_once_consumed",
+      participantIds,
+      conversationId: message.conversationId,
+      messageId: message.id,
+      userId: user.id,
+    });
+    return fullMessage;
+  }
+
+  async reportViewOnceScreenshot(token: string, messageId: string) {
+    const user = await this.requireUserByToken(token);
+    const [message] = await db!
+      .select()
+      .from(messagesTable)
+      .where(eq(messagesTable.id, messageId))
+      .limit(1);
+
+    if (!message) {
+      throw new Error("Message introuvable");
+    }
+
+    await this.requireConversationMembership(message.conversationId, user.id);
+
+    if (
+      !isViewOnceImageContent(message.content) &&
+      !isViewOnceOpenedContent(message.content)
+    ) {
+      throw new Error("Ce message n'est pas un média à vue unique");
+    }
+
+    if (message.senderId === user.id) {
+      throw new Error("L'expéditeur ne peut pas déclencher cette alerte");
+    }
+
+    await db!
+      .insert(messageViewOnceScreenshotsTable)
+      .values({
+        messageId: message.id,
+        userId: user.id,
+        capturedAt: new Date(),
+      })
+      .onConflictDoNothing();
+
+    const openedPayload = parseViewOnceOpenedContent(message.content);
+    const mediaType = openedPayload?.mediaType ?? "image";
+
+    if (isViewOnceOpenedContent(message.content)) {
+      await db!
+        .update(messagesTable)
+        .set({
+          content: encodeViewOnceOpenedContent(mediaType, { screenshotted: true }),
+        })
+        .where(eq(messagesTable.id, message.id));
+    }
+
+    const participantIds = await this.getConversationParticipantIds(message.conversationId);
+    const screenshotter = await this.requireUserById(user.id);
+
+    const fullMessage = isViewOnceOpenedContent(message.content)
+      ? await this.toMessage(message.conversationId, message.id, user.id)
+      : undefined;
+
+    this.publish({
+      type: "message.view_once_screenshot",
+      participantIds,
+      conversationId: message.conversationId,
+      messageId: message.id,
+      userId: user.id,
+      messageSenderId: message.senderId,
+      message: fullMessage,
+    });
+
+    const senderDevices = await db!
+      .select({
+        pushToken: deviceTokensTable.pushToken,
+        muted: conversationMembersTable.mutedAt,
+      })
+      .from(deviceTokensTable)
+      .innerJoin(usersTable, eq(usersTable.id, deviceTokensTable.userId))
+      .innerJoin(
+        conversationMembersTable,
+        and(
+          eq(conversationMembersTable.userId, deviceTokensTable.userId),
+          eq(conversationMembersTable.conversationId, message.conversationId),
+        ),
+      )
+      .where(
+        and(
+          eq(deviceTokensTable.userId, message.senderId),
+          eq(usersTable.notificationsEnabled, true),
+        ),
+      );
+
+    await sendExpoPushMessages(
+      senderDevices.map((device) => ({
+        id: "view-once-screenshot",
+        userId: message.senderId,
+        pushToken: device.pushToken,
+        platform: "mobile",
+        deviceName: "device",
+        muted: Boolean(device.muted),
+      })),
+      screenshotter.name || "Gbairai",
+      "Capture d'écran sur votre photo à vue unique",
+      { conversationId: message.conversationId, messageType: "image" },
+    );
+
+    return { messageId: message.id, conversationId: message.conversationId };
+  }
+
+  private async hasViewOnceScreenshot(messageId: string) {
+    const [row] = await db!
+      .select({ messageId: messageViewOnceScreenshotsTable.messageId })
+      .from(messageViewOnceScreenshotsTable)
+      .where(eq(messageViewOnceScreenshotsTable.messageId, messageId))
+      .limit(1);
+
+    return Boolean(row);
+  }
+
   async updateConversationMessage(
     token: string,
     messageId: string,
@@ -3329,7 +3536,16 @@ class DatabaseChatService implements ChatService {
       createdAt: now,
     });
 
-    return this.toStorySummary(storyId, user.id);
+    const summary = await this.toStorySummary(storyId, user.id);
+    const audienceIds = await this.listStoryAudience(user.id);
+    this.publish({
+      type: "story.created",
+      participantIds: [user.id, ...audienceIds],
+      userId: user.id,
+      story: summary,
+    });
+
+    return summary;
   }
 
   async addStoryView(token: string, storyId: string) {
@@ -4080,6 +4296,42 @@ class DatabaseChatService implements ChatService {
     return { messageId, reactions };
   }
 
+  private async resolveMessageContentForViewer(
+    message: typeof messagesTable.$inferSelect,
+    viewerUserId?: string,
+  ) {
+    if (!viewerUserId || message.type !== "image") {
+      return message.content;
+    }
+    if (isViewOnceOpenedContent(message.content)) {
+      return message.content;
+    }
+    if (!isViewOnceImageContent(message.content)) {
+      return message.content;
+    }
+    if (message.senderId === viewerUserId) {
+      return message.content;
+    }
+
+    const [open] = await db!
+      .select({ userId: messageViewOnceOpensTable.userId })
+      .from(messageViewOnceOpensTable)
+      .where(
+        and(
+          eq(messageViewOnceOpensTable.messageId, message.id),
+          eq(messageViewOnceOpensTable.userId, viewerUserId),
+        ),
+      )
+      .limit(1);
+
+    if (open) {
+      const screenshotted = await this.hasViewOnceScreenshot(message.id);
+      return encodeViewOnceOpenedContent("image", { screenshotted });
+    }
+
+    return message.content;
+  }
+
   private async toMessage(
     conversationId: string,
     messageId: string,
@@ -4106,11 +4358,13 @@ class DatabaseChatService implements ChatService {
       .from(messageReceiptsTable)
       .where(eq(messageReceiptsTable.messageId, message.id));
 
+    const content = await this.resolveMessageContentForViewer(message, viewerUserId);
+
     return {
       id: message.id,
       conversationId: message.conversationId,
       senderId: message.senderId,
-      content: message.content,
+      content,
       type: message.type,
       createdAt: message.createdAt.toISOString(),
       receipts: receipts.map((receipt) => ({
@@ -4276,8 +4530,36 @@ class DatabaseChatService implements ChatService {
     }
 
     const viewerHasOwner = await this.hasRegisteredContact(viewerUserId, ownerUserId);
+    if (viewerHasOwner) {
+      return true;
+    }
+
     const ownerHasViewer = await this.hasRegisteredContact(ownerUserId, viewerUserId);
-    return viewerHasOwner && ownerHasViewer;
+    return ownerHasViewer;
+  }
+
+  private async listStoryAudience(ownerUserId: string) {
+    const viewersFromContacts = await db!
+      .select({ ownerUserId: contactEdgesTable.ownerUserId })
+      .from(contactEdgesTable)
+      .where(eq(contactEdgesTable.matchedUserId, ownerUserId));
+
+    const viewersFromOwnersContacts = await db!
+      .select({ matchedUserId: contactEdgesTable.matchedUserId })
+      .from(contactEdgesTable)
+      .where(eq(contactEdgesTable.ownerUserId, ownerUserId));
+
+    const audienceIds = new Set<string>();
+    for (const row of viewersFromContacts) {
+      audienceIds.add(row.ownerUserId);
+    }
+    for (const row of viewersFromOwnersContacts) {
+      if (row.matchedUserId) {
+        audienceIds.add(row.matchedUserId);
+      }
+    }
+    audienceIds.delete(ownerUserId);
+    return Array.from(audienceIds);
   }
 
   private async isEitherBlocked(userA: string, userB: string) {
