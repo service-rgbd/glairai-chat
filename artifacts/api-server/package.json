@@ -10,7 +10,8 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test src/lib/channel-utils.test.mjs src/routes/channels.integration.test.mjs",
-    "test:channels": "node --test src/lib/channel-utils.test.mjs src/routes/channels.integration.test.mjs"
+    "test:channels": "node --test src/lib/channel-utils.test.mjs src/routes/channels.integration.test.mjs",
+    "generate:emoji-catalog": "node ./scripts/generate-emoji-catalog.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1053.0",

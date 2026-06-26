@@ -17,8 +17,10 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthenticatedIncomingCallOverlay } from "@/components/AuthenticatedIncomingCallOverlay";
 import { AuthenticatedNativeCallController } from "@/components/AuthenticatedNativeCallController";
+import { NetworkStatusBridge } from "@/components/NetworkStatusBridge";
 import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { NetworkStatusProvider } from "@/contexts/NetworkStatusContext";
 import { ChatWallpaperProvider } from "@/contexts/ChatWallpaperContext";
 import { ChatsProvider } from "@/contexts/ChatsContext";
 import { ChannelsProvider } from "@/modules/channels/context/ChannelsContext";
@@ -34,6 +36,7 @@ function RootAppBody() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthenticatedIncomingCallOverlay />
       <AuthenticatedNativeCallController />
+      <NetworkStatusBridge />
       <RootStack />
     </GestureHandlerRootView>
   );
@@ -92,15 +95,17 @@ export default function RootLayout() {
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
-              <PersistedQueryProvider>
-                <ChatWallpaperProvider>
-                  <ChatsProvider>
-                    <ChannelsProvider>
-                      <RootAppBody />
-                    </ChannelsProvider>
-                  </ChatsProvider>
-                </ChatWallpaperProvider>
-              </PersistedQueryProvider>
+              <NetworkStatusProvider>
+                <PersistedQueryProvider>
+                  <ChatWallpaperProvider>
+                    <ChatsProvider>
+                      <ChannelsProvider>
+                        <RootAppBody />
+                      </ChannelsProvider>
+                    </ChatsProvider>
+                  </ChatWallpaperProvider>
+                </PersistedQueryProvider>
+              </NetworkStatusProvider>
             </AuthProvider>
           </QueryClientProvider>
         </ThemeProvider>

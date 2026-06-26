@@ -10,19 +10,26 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  ChannelCategoryPicker,
+  ChannelFormField,
+  ChannelHeroCard,
+  ChannelPrimaryButton,
+  ChannelScreenHeader,
+  ChannelSection,
+} from "@/modules/channels/components/ChannelFormUi";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
 import { uploadChannelImage } from "@/modules/channels/lib/upload-image";
+import { isLikelyNetworkError } from "@/lib/app-network";
 import { useColors } from "@/hooks/useColors";
 
 const CATEGORIES = ["Organisations", "Sport", "Style De Vie", "Divertissement"];
-const CREATE_ILLUSTRATION = require("@/assets/images/channels/create-illustration.png");
 
 export default function CreateChannelScreen() {
   const colors = useColors();
@@ -36,7 +43,7 @@ export default function CreateChannelScreen() {
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [category, setCategory] = useState(CATEGORIES[0]!);
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -82,7 +89,11 @@ export default function CreateChannelScreen() {
       setAvatarPreview(null);
       setAvatarUri(null);
       setError(
-        uploadError instanceof Error ? uploadError.message : "Impossible d'envoyer la photo",
+        isLikelyNetworkError(uploadError)
+          ? "Connexion insuffisante pour envoyer la photo. Réessayez avec un meilleur réseau."
+          : uploadError instanceof Error
+            ? uploadError.message
+            : "Impossible d'envoyer la photo",
       );
     } finally {
       setUploadingAvatar(false);
@@ -102,7 +113,13 @@ export default function CreateChannelScreen() {
       await refreshDiscovery();
       router.replace(`/channel/${result.channel.id}`);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : "Impossible de créer la chaîne");
+      setError(
+        isLikelyNetworkError(createError)
+          ? "Impossible de créer la chaîne sans connexion internet."
+          : createError instanceof Error
+            ? createError.message
+            : "Impossible de créer la chaîne",
+      );
     } finally {
       setSaving(false);
     }
@@ -110,111 +127,95 @@ export default function CreateChannelScreen() {
 
   const displayAvatar = avatarPreview ?? avatarUri;
   const isBusy = saving || uploadingAvatar;
+  const canCreate = name.trim().length >= 2 && !isBusy;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 6, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.75}>
-          <Ionicons name="close" size={26} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>Nouvelle chaîne</Text>
-        <View style={{ width: 26 }} />
-      </View>
+      <ChannelScreenHeader
+        title="Nouvelle chaîne"
+        topPad={topPad}
+        backIcon="close"
+        onBack={() => router.back()}
+      />
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: bottomPad + 24, gap: 16 }}>
-        <TouchableOpacity
-          style={styles.avatarSection}
-          onPress={() => void pickAvatar()}
-          activeOpacity={0.85}
-          disabled={isBusy}
-        >
-          <View style={styles.avatarShell}>
-            {displayAvatar ? (
-              <Image source={{ uri: displayAvatar }} style={styles.avatar} contentFit="cover" />
-            ) : (
-              <LinearGradient colors={["#6D4AFF", "#00D4A4"]} style={styles.avatar}>
-                <Ionicons name="camera" size={28} color="#fff" />
-              </LinearGradient>
-            )}
-            {uploadingAvatar ? (
-              <View style={styles.avatarOverlay}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            ) : null}
-          </View>
-          <Text style={[styles.avatarHint, { color: colors.mutedForeground }]}>
-            Photo de la chaîne
-          </Text>
-        </TouchableOpacity>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPad + 28 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <ChannelHeroCard
+          badge="Chaînes Gbairai"
+          title="Créez votre espace"
+          subtitle="Publiez des annonces, développez votre audience et gérez votre chaîne comme sur Telegram."
+        />
 
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: colors.mutedForeground }]}>Nom</Text>
-          <TextInput
+        <ChannelSection title="Identité visuelle">
+          <TouchableOpacity
+            style={styles.avatarRow}
+            onPress={() => void pickAvatar()}
+            activeOpacity={0.85}
+            disabled={isBusy}
+          >
+            <View style={styles.avatarShell}>
+              {displayAvatar ? (
+                <Image source={{ uri: displayAvatar }} style={styles.avatar} contentFit="cover" />
+              ) : (
+                <LinearGradient colors={["#6D4AFF", "#00D4A4"]} style={styles.avatar}>
+                  <Ionicons name="camera" size={28} color="#fff" />
+                </LinearGradient>
+              )}
+              {uploadingAvatar ? (
+                <View style={styles.avatarOverlay}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.avatarCopy}>
+              <Text style={[styles.avatarTitle, { color: colors.text }]}>Photo de la chaîne</Text>
+              <Text style={[styles.avatarHint, { color: colors.mutedForeground }]}>
+                Format carré recommandé · visible par tous les abonnés
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </ChannelSection>
+
+        <ChannelSection title="Informations">
+          <ChannelFormField
+            label="Nom de la chaîne"
             value={name}
             onChangeText={setName}
-            placeholder="Ma chaîne"
-            placeholderTextColor={colors.mutedForeground}
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+            placeholder="Ex. Gbairai Sport"
+            maxLength={64}
+            hint="Choisissez un nom clair et mémorable."
           />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: colors.mutedForeground }]}>Description</Text>
-          <TextInput
+          <ChannelFormField
+            label="Description"
             value={description}
             onChangeText={setDescription}
-            placeholder="Décrivez votre chaîne"
-            placeholderTextColor={colors.mutedForeground}
+            placeholder="Présentez votre chaîne en quelques lignes"
             multiline
-            style={[
-              styles.input,
-              styles.textArea,
-              { color: colors.text, borderColor: colors.border, backgroundColor: colors.card },
-            ]}
+            maxLength={280}
+            hint="Cette description apparaît sur la fiche publique de votre chaîne."
           />
-        </View>
+        </ChannelSection>
 
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: colors.mutedForeground }]}>Catégorie</Text>
-          <View style={styles.categories}>
-            {CATEGORIES.map((item) => {
-              const active = category === item;
-              return (
-                <TouchableOpacity
-                  key={item}
-                  style={[
-                    styles.categoryChip,
-                    {
-                      backgroundColor: active ? colors.primary : colors.card,
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                  onPress={() => setCategory(item)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={{ color: active ? "#fff" : colors.text, fontFamily: "Inter_500Medium" }}>
-                    {item}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+        <ChannelSection title="Catégorie">
+          <ChannelCategoryPicker categories={CATEGORIES} value={category} onChange={setCategory} />
+        </ChannelSection>
+
+        {error ? (
+          <View style={[styles.errorCard, { backgroundColor: `${colors.destructive}12`, borderColor: `${colors.destructive}33` }]}>
+            <Ionicons name="alert-circle-outline" size={18} color={colors.destructive} />
+            <Text style={[styles.errorText, { color: colors.destructive }]}>{error}</Text>
           </View>
-        </View>
+        ) : null}
 
-        {error ? <Text style={[styles.error, { color: colors.destructive }]}>{error}</Text> : null}
-
-        <TouchableOpacity
-          style={[styles.createBtn, { backgroundColor: colors.primary, opacity: isBusy ? 0.75 : 1 }]}
+        <ChannelPrimaryButton
+          label="Créer la chaîne"
           onPress={() => void handleCreate()}
-          disabled={isBusy || name.trim().length < 2}
-          activeOpacity={0.85}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.createText}>Créer la chaîne</Text>
-          )}
-        </TouchableOpacity>
+          loading={saving}
+          disabled={!canCreate}
+        />
       </ScrollView>
     </View>
   );
@@ -222,29 +223,27 @@ export default function CreateChannelScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: {
+  content: {
+    padding: 16,
+    gap: 18,
+  },
+  avatarRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 14,
   },
-  title: { fontSize: 18, fontFamily: "Inter_600SemiBold" },
-  avatarSection: { alignItems: "center", gap: 10, paddingVertical: 8 },
   avatarShell: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     overflow: "hidden",
   },
   avatar: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden",
   },
   avatarOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -252,47 +251,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarHint: { fontSize: 13, fontFamily: "Inter_400Regular" },
-  illustrationWrap: {
-    width: "100%",
-    height: 168,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+  avatarCopy: {
+    flex: 1,
+    gap: 4,
   },
-  illustration: {
-    width: "100%",
-    height: "100%",
-  },
-  field: { gap: 8 },
-  label: { fontSize: 13, fontFamily: "Inter_500Medium" },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+  avatarTitle: {
     fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+  },
+  avatarHint: {
+    fontSize: 12,
+    lineHeight: 17,
     fontFamily: "Inter_400Regular",
   },
-  textArea: { minHeight: 100, textAlignVertical: "top" },
-  categories: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  categoryChip: {
+  errorCard: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  error: { fontSize: 13, fontFamily: "Inter_400Regular" },
-  createBtn: {
-    height: 50,
     borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
   },
-  createText: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_500Medium",
+  },
 });

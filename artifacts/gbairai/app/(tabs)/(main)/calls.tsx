@@ -5,6 +5,7 @@ import { Platform, SectionList, StyleSheet, Text, TouchableOpacity, View, Alert 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CallItem } from "@/components/CallItem";
+import { NetworkStatusChip } from "@/components/NetworkStatusChip";
 import { useAuth } from "@/contexts/AuthContext";
 import { MOCK_CALLS } from "@/lib/mock-calls";
 import { useChats } from "@/contexts/chats-context-ref";
@@ -57,7 +58,10 @@ export default function CallsScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad + 6, borderBottomColor: colors.border, backgroundColor: colors.headerBg }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Appels</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Appels</Text>
+          <NetworkStatusChip />
+        </View>
         <View style={styles.headerActions}>
           <TouchableOpacity onPress={openGlobalSearch} activeOpacity={0.7}>
             <Ionicons name="search-outline" size={22} color={colors.text} />
@@ -105,6 +109,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   headerTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
   headerActions: { flexDirection: "row", alignItems: "center" },

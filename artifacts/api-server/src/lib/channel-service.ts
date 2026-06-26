@@ -796,6 +796,22 @@ class ChannelService {
 
     const sections: Array<{ title: string; channels: ChannelDto[] }> = [];
 
+    const ownedRows = await database
+      .select()
+      .from(channelsTable)
+      .where(eq(channelsTable.ownerId, userId))
+      .orderBy(desc(channelsTable.updatedAt))
+      .limit(10);
+
+    if (ownedRows.length) {
+      sections.push({
+        title: "Mes chaînes",
+        channels: ownedRows.map((row) =>
+          this.mapChannel(row, { isFollowing: false, role: "owner" }),
+        ),
+      });
+    }
+
     const popular = await this.listChannels(token, { limit: 6 });
     if (popular.channels.length) {
       sections.push({ title: "Explorer les chaînes", channels: popular.channels });

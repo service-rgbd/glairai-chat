@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import bundledEmojiCatalog from "../data/emoji-catalog.json";
 import { getFluentEmojiAssetsRoot } from "./emoji-assets";
 
 export type EmojiCatalogItem = {
@@ -45,6 +46,36 @@ const BUILTIN_EMOJI_CATALOG: EmojiCatalog = {
   groups: ["Favoris"],
 };
 
+function isBundledCatalog(value: unknown): value is EmojiCatalog {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as EmojiCatalog;
+  return Array.isArray(candidate.items) && Array.isArray(candidate.groups);
+}
+
+const COMMITTED_EMOJI_CATALOG: EmojiCatalog = isBundledCatalog(bundledEmojiCatalog)
+  ? bundledEmojiCatalog
+  : BUILTIN_EMOJI_CATALOG;
+
+async function resolve3dAssetPath(root: string, fluentName: string) {
+  const slug = fluentEmojiSlug(fluentName);
+  const candidates = [
+    `${fluentName}/3D/${slug}_3d.png`,
+    `${fluentName}/Default/3D/${slug}_3d_default.png`,
+    `${fluentName}/3D/${slug}_3d_default.png`,
+  ];
+
+  for (const relative of candidates) {
+    try {
+      await access(path.join(root, relative));
+      return relative;
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return null;
+}
+
 export async function getEmoji3dCatalog(): Promise<EmojiCatalog> {
   if (cachedCatalog) {
     return cachedCatalog;
@@ -52,7 +83,7 @@ export async function getEmoji3dCatalog(): Promise<EmojiCatalog> {
 
   const root = getFluentEmojiAssetsRoot();
   if (!existsSync(root)) {
-    cachedCatalog = BUILTIN_EMOJI_CATALOG;
+    cachedCatalog = COMMITTED_EMOJI_CATALOG;
     return cachedCatalog;
   }
 
@@ -63,14 +94,8 @@ export async function getEmoji3dCatalog(): Promise<EmojiCatalog> {
     if (!entry.isDirectory()) continue;
 
     const fluentName = entry.name;
-    const assetPath = `${fluentName}/3D/${fluentEmojiSlug(fluentName)}_3d.png`;
-    const assetFullPath = path.join(root, assetPath);
-
-    try {
-      await access(assetFullPath);
-    } catch {
-      continue;
-    }
+    const assetPath = await resolve3dAssetPath(root, fluentName);
+    if (!assetPath) continue;
 
     let emoji = "❓";
     let label = fluentName;
@@ -106,7 +131,7 @@ export async function getEmoji3dCatalog(): Promise<EmojiCatalog> {
     a.localeCompare(b, "fr"),
   );
 
-  cachedCatalog = { items, groups };
+  cachedCatalog = items.length ? { items, groups } : COMMITTED_EMOJI_CATALOG;
   return cachedCatalog;
 }
 

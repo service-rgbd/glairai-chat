@@ -18,6 +18,8 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
 let _otpDemoRequests = false;
+let _offlineMutationGuard: (() => boolean) | null = null;
+let _onOfflineMutationBlocked: (() => void) | null = null;
 
 /**
  * En mode test Expo, envoie `X-Otp-Demo: true` sur POST /auth/request-otp
@@ -51,6 +53,18 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+/**
+ * Bloque les requêtes mutantes (POST, PUT, PATCH, DELETE) hors ligne.
+ * Le guard doit retourner `true` quand la requête doit être bloquée.
+ */
+export function setOfflineMutationGuard(
+  guard: (() => boolean) | null,
+  onBlocked: (() => void) | null = null,
+): void {
+  _offlineMutationGuard = guard;
+  _onOfflineMutationBlocked = onBlocked;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -375,6 +389,16 @@ export async function customFetch<T = unknown>(
     !headers.has("x-otp-demo")
   ) {
     headers.set("x-otp-demo", "true");
+  }
+
+  if (
+    _offlineMutationGuard?.() &&
+    method !== "GET" &&
+    method !== "HEAD" &&
+    !requestUrl.includes("/auth/request-otp")
+  ) {
+    _onOfflineMutationBlocked?.();
+    throw new Error("Pas de connexion internet");
   }
 
   const requestInfo = { method, url: requestUrl };

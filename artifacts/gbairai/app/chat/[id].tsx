@@ -769,6 +769,8 @@ export default function ChatScreen() {
         onClose={() => setShowChatOptions(false)}
         title={displayName}
         subtitle="Gérer cette conversation"
+        placement="top"
+        anchorTopOffset={insets.top + HEADER_BODY_HEIGHT + 6}
         options={chatMenuOptions}
       />
 

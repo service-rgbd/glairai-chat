@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -16,6 +16,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChannelListItem } from "@/modules/channels/components/ChannelListItem";
 import { ChannelPostCard } from "@/modules/channels/components/ChannelPostCard";
 import { ChannelSearchBar } from "@/modules/channels/components/ChannelSearchBar";
+import { NetworkStatusChip } from "@/components/NetworkStatusChip";
+import { useNetworkStatus } from "@/contexts/NetworkStatusContext";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
 import type { Channel, ChannelPost } from "@/modules/channels/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +34,7 @@ export default function ChannelsListScreen() {
     feedPosts,
     isLoadingDiscovery,
     isLoadingFeed,
+    discoveryError,
     refreshDiscovery,
     refreshFeed,
     searchChannels,
@@ -40,6 +43,7 @@ export default function ChannelsListScreen() {
     reactToPost,
     recordView,
   } = useChannels();
+  const { isOffline, notifyOfflineAction } = useNetworkStatus();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -69,6 +73,11 @@ export default function ChannelsListScreen() {
   const showFeed = useMemo(() => !search.trim() && feedPosts.length > 0, [feedPosts.length, search]);
 
   const ownedChannels = useMemo(() => {
+    const mineSection = discoverySections.find((section) => section.title === "Mes chaînes");
+    if (mineSection?.channels.length) {
+      return mineSection.channels;
+    }
+
     const byId = new Map<string, Channel>();
     for (const section of discoverySections) {
       for (const channel of section.channels) {
@@ -81,6 +90,26 @@ export default function ChannelsListScreen() {
       right.updatedAt.localeCompare(left.updatedAt),
     );
   }, [currentUser?.id, discoverySections]);
+
+  const browseSections = useMemo(
+    () => discoverySections.filter((section) => section.title !== "Mes chaînes"),
+    [discoverySections],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (discoveryError || (!isLoadingDiscovery && discoverySections.length === 0)) {
+        void refreshDiscovery();
+        void refreshFeed();
+      }
+    }, [
+      discoveryError,
+      discoverySections.length,
+      isLoadingDiscovery,
+      refreshDiscovery,
+      refreshFeed,
+    ]),
+  );
 
   const handleFollowToggle = async (channel: Channel) => {
     setFollowBusyId(channel.id);
@@ -97,6 +126,10 @@ export default function ChannelsListScreen() {
   };
 
   const onRefresh = async () => {
+    if (isOffline) {
+      notifyOfflineAction();
+      return;
+    }
     setRefreshing(true);
     try {
       await Promise.all([refreshDiscovery(), refreshFeed()]);
@@ -119,7 +152,10 @@ export default function ChannelsListScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad + 6, borderBottomColor: colors.border }]}>
-        <Text style={[styles.title, { color: colors.text }]}>Chaînes</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={[styles.title, { color: colors.text }]}>Chaînes</Text>
+          <NetworkStatusChip />
+        </View>
         <TouchableOpacity
           style={[styles.iconBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={() => router.push("/channel/create")}
@@ -207,10 +243,35 @@ export default function ChannelsListScreen() {
               </View>
             ) : null}
 
-            {isLoadingDiscovery ? (
+            {discoveryError ? (
+              <View style={[styles.errorCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="cloud-offline-outline" size={22} color={colors.destructive} />
+                <View style={styles.errorCopy}>
+                  <Text style={[styles.errorTitle, { color: colors.text }]}>Impossible de charger les chaînes</Text>
+                  <Text style={[styles.errorHint, { color: colors.mutedForeground }]}>
+                    Vérifiez votre connexion puis réessayez.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.errorBtn, { backgroundColor: colors.primary }]}
+                  onPress={() => {
+                    if (isOffline) {
+                      notifyOfflineAction();
+                      return;
+                    }
+                    void onRefresh();
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.errorBtnText}>Réessayer</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {isLoadingDiscovery && !discoverySections.length ? (
               <ActivityIndicator style={styles.loader} color={colors.primary} />
             ) : (
-              discoverySections.map((section) => (
+              browseSections.map((section) => (
                 <View key={section.title} style={styles.section}>
                   <View style={styles.sectionHeader}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>{section.title}</Text>
@@ -230,6 +291,12 @@ export default function ChannelsListScreen() {
                 </View>
               ))
             )}
+
+            {!search.trim() && !isLoadingDiscovery && !discoveryError && !browseSections.length ? (
+              <Text style={[styles.emptyHint, { color: colors.mutedForeground }]}>
+                Aucune chaîne à explorer pour le moment. Créez la vôtre ou revenez plus tard.
+              </Text>
+            ) : null}
 
             {!search.trim() ? (
               <TouchableOpacity
@@ -265,6 +332,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   title: {
     fontSize: 30,
@@ -357,5 +429,45 @@ const styles = StyleSheet.create({
   ownedManageText: {
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
+  },
+  errorCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  errorCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  errorTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  errorHint: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  errorBtn: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  errorBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  emptyHint: {
+    textAlign: "center",
+    marginHorizontal: 24,
+    marginTop: 16,
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: "Inter_400Regular",
   },
 });

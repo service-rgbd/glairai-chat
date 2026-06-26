@@ -25,6 +25,7 @@ import { ChatItem } from "@/components/ChatItem";
 import { ChatOptionsSheet } from "@/components/ChatOptionsSheet";
 import { ConversationFilterChips } from "@/components/ConversationFilterChips";
 import { GroupInviteBanner } from "@/components/GroupInviteBanner";
+import { NetworkStatusChip } from "@/components/NetworkStatusChip";
 import { PasswordPromptModal } from "@/components/PasswordPromptModal";
 import { SearchBar } from "@/components/SearchBar";
 import { StoryRing } from "@/components/StoryRing";
@@ -672,6 +673,7 @@ export default function ChatsScreen() {
               <Text style={{ color: colors.primary }}> {totalUnread}</Text>
             )}
           </Text>
+          <NetworkStatusChip />
         </View>
         <View style={styles.headerActions}>
           <TouchableOpacity

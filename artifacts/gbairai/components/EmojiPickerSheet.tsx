@@ -15,7 +15,7 @@ import {
 
 import { useColors } from "@/hooks/useColors";
 import { filterEmojiCatalogItems, useEmoji3dCatalog, type EmojiCatalogItem } from "@/lib/emoji-catalog";
-import { CHAT_EMOJI_3D, getChatEmoji3dImageUrl } from "@/lib/story-reactions";
+import { CHAT_EMOJI_3D, fluentEmojiAssetRelativePath, getChatEmoji3dImageUrl } from "@/lib/story-reactions";
 
 interface EmojiPickerSheetProps {
   visible: boolean;
@@ -25,7 +25,7 @@ interface EmojiPickerSheetProps {
 
 export function EmojiPickerSheet({ visible, onClose, onSelect }: EmojiPickerSheetProps) {
   const colors = useColors();
-  const { data, isLoading, isError } = useEmoji3dCatalog(visible);
+  const { data, isLoading } = useEmoji3dCatalog(visible);
   const [search, setSearch] = useState("");
   const [activeGroup, setActiveGroup] = useState("all");
 
@@ -36,25 +36,25 @@ export function EmojiPickerSheet({ visible, onClose, onSelect }: EmojiPickerShee
         emoji: emoji.emoji,
         label: emoji.label,
         fluentName: emoji.fluentName,
-        assetPath: emoji.assetPath ?? `${emoji.fluentName}/3D/${emoji.id}_3d.png`,
+        assetPath: emoji.assetPath ?? fluentEmojiAssetRelativePath(emoji.fluentName),
         group: "Favoris",
       })),
     [],
   );
 
   const groups = useMemo(() => {
-    if (!data?.groups.length) return ["all"];
-    return ["all", ...data.groups];
+    const source = data?.groups.length ? data.groups : ["Favoris"];
+    return ["all", ...source];
   }, [data?.groups]);
 
   const items = useMemo(() => {
     const catalog =
-      data?.items.length && !isError
+      data?.items.length
         ? data
         : { items: fallbackItems, groups: ["Favoris"] as string[] };
 
     return filterEmojiCatalogItems(catalog, { group: activeGroup, q: search });
-  }, [activeGroup, data, fallbackItems, isError, search]);
+  }, [activeGroup, data, fallbackItems, search]);
 
   const handleClose = () => {
     setSearch("");
@@ -74,9 +74,7 @@ export function EmojiPickerSheet({ visible, onClose, onSelect }: EmojiPickerShee
             <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
               {isLoading
                 ? "Chargement du catalogue..."
-                : data?.items.length && !isError
-                  ? `${data.items.length} émojis disponibles`
-                  : `${fallbackItems.length} émojis disponibles (mode hors ligne)`}
+                : `${data?.items.length ?? fallbackItems.length} émojis disponibles`}
             </Text>
 
             <TextInput

@@ -208,18 +208,41 @@ export async function uploadAudioToSignedUrl(
 ) {
   const file = new File(fileUri);
   const buffer = await file.arrayBuffer();
-  const uploadResponse = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "content-type": mimeType,
-    },
-    body: buffer,
-  });
+  await uploadBytesToSignedUrl(uploadUrl, buffer, mimeType);
+}
 
-  if (!uploadResponse.ok) {
-    const text = await uploadResponse.text();
-    throw new Error(text.trim() || "Impossible d'envoyer le fichier audio");
-  }
+const MEDIA_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
+function uploadBytesToSignedUrl(
+  uploadUrl: string,
+  body: ArrayBuffer,
+  mimeType: string,
+  timeoutMs = MEDIA_UPLOAD_TIMEOUT_MS,
+) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", uploadUrl);
+    xhr.setRequestHeader("content-type", mimeType);
+    xhr.timeout = timeoutMs;
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      reject(new Error(xhr.responseText?.trim() || "Impossible d'envoyer le média"));
+    };
+    xhr.onerror = () => {
+      reject(new TypeError("Connexion interrompue pendant l'envoi du média"));
+    };
+    xhr.ontimeout = () => {
+      reject(
+        new TypeError(
+          "L'envoi a pris trop de temps. Vérifiez votre connexion ou essayez une vidéo plus courte.",
+        ),
+      );
+    };
+    xhr.send(body);
+  });
 }
 
 export async function uploadFileToSignedUrl(
@@ -231,18 +254,7 @@ export async function uploadFileToSignedUrl(
   const readableUri = await prepareLocalMediaUriForUpload(fileUri, mimeType, assetId);
   const file = new File(readableUri);
   const buffer = await file.arrayBuffer();
-  const uploadResponse = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "content-type": mimeType,
-    },
-    body: buffer,
-  });
-
-  if (!uploadResponse.ok) {
-    const text = await uploadResponse.text();
-    throw new Error(text.trim() || "Impossible d'envoyer le média");
-  }
+  await uploadBytesToSignedUrl(uploadUrl, buffer, mimeType);
 }
 
 export async function generateVideoThumbnailUri(videoUri: string) {

@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "@/components/Avatar";
 import { StoryMediaComposer } from "@/components/StoryMediaComposer";
 import { StoryMediaPickerModal } from "@/components/StoryMediaPickerModal";
+import { NetworkStatusChip } from "@/components/NetworkStatusChip";
 import { StoryTextComposer } from "@/components/StoryTextComposer";
 import { useAuth } from "@/contexts/AuthContext";
 import type { GStory, GUser, StoryComposerDraft } from "@/contexts/chats-types";
@@ -300,7 +301,10 @@ export default function StatusScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad + 6, borderBottomColor: colors.border, backgroundColor: colors.headerBg }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Statuts</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Statuts</Text>
+          <NetworkStatusChip />
+        </View>
         <TouchableOpacity
           onPress={openGlobalSearch}
           activeOpacity={0.7}
@@ -405,6 +409,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   headerTitle: { fontSize: 22, fontFamily: "Inter_700Bold" },
   myStatus: {

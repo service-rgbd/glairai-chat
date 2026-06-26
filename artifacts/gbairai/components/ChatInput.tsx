@@ -23,6 +23,7 @@ import {
   View,
 } from "react-native";
 
+import { MediaUploadOverlay } from "@/components/MediaUploadOverlay";
 import { UploadProgressBanner } from "@/components/UploadProgressBanner";
 import { EmojiPickerSheet } from "@/components/EmojiPickerSheet";
 import { useAuth } from "@/contexts/AuthContext";
@@ -207,6 +208,7 @@ export function ChatInput({
   const recorderState = useAudioRecorderState(recorder);
   const autoRecordStartedRef = useRef(false);
 
+  const isPreviewModalOpen = Boolean(pendingImage || pendingVideo || pendingAudio);
   const isUploading = uploadStatus !== null;
 
   const uploadPendingImage = async (image: NonNullable<typeof pendingImage>) => {
@@ -477,9 +479,9 @@ export function ChatInput({
             </TouchableOpacity>
           </View>
         ) : null}
-        {uploadStatus ? (
+        {uploadStatus && !isPreviewModalOpen ? (
           <View style={styles.uploadBannerWrap}>
-            <UploadProgressBanner status={uploadStatus} />
+            <UploadProgressBanner status={uploadStatus} variant="immersive" />
           </View>
         ) : null}
         <View style={styles.inputRow}>
@@ -652,12 +654,10 @@ export function ChatInput({
             <View style={styles.previewIconBtn} />
           </View>
 
-          {pendingAudio ? <PendingVoicePreview audio={pendingAudio} /> : null}
-
-          {uploadStatus ? (
-            <View style={styles.previewUploadWrap}>
-              <UploadProgressBanner status={uploadStatus} />
-            </View>
+          {pendingAudio ? (
+            <MediaUploadOverlay status={uploadStatus} style={styles.previewMediaStage}>
+              <PendingVoicePreview audio={pendingAudio} />
+            </MediaUploadOverlay>
           ) : null}
 
           {audioError ? (
@@ -737,17 +737,13 @@ export function ChatInput({
           </View>
 
           {pendingImage ? (
-            <Image
-              source={{ uri: pendingImage.uri }}
-              style={styles.previewImage}
-              contentFit="contain"
-            />
-          ) : null}
-
-          {uploadStatus ? (
-            <View style={styles.previewUploadWrap}>
-              <UploadProgressBanner status={uploadStatus} />
-            </View>
+            <MediaUploadOverlay status={uploadStatus} style={styles.previewMediaStage}>
+              <Image
+                source={{ uri: pendingImage.uri }}
+                style={styles.previewImage}
+                contentFit="contain"
+              />
+            </MediaUploadOverlay>
           ) : null}
 
           <View style={styles.previewOptionsRow}>
@@ -847,28 +843,24 @@ export function ChatInput({
           </View>
 
           {pendingVideo ? (
-            <View style={styles.videoPreviewWrap}>
+            <MediaUploadOverlay status={uploadStatus} style={styles.videoPreviewWrap}>
               <Image
                 source={{ uri: pendingVideo.thumbnailUri }}
                 style={styles.previewImage}
                 contentFit="contain"
               />
-              <View style={styles.videoPreviewOverlay}>
-                <Ionicons name="play-circle" size={64} color="#fff" />
-                {pendingVideo.durationSeconds ? (
-                  <Text style={styles.videoPreviewDuration}>
-                    {Math.floor(pendingVideo.durationSeconds / 60)}:
-                    {(pendingVideo.durationSeconds % 60).toString().padStart(2, "0")}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          ) : null}
-
-          {uploadStatus ? (
-            <View style={styles.previewUploadWrap}>
-              <UploadProgressBanner status={uploadStatus} />
-            </View>
+              {!uploadStatus ? (
+                <View style={styles.videoPreviewOverlay}>
+                  <Ionicons name="play-circle" size={64} color="#fff" />
+                  {pendingVideo.durationSeconds ? (
+                    <Text style={styles.videoPreviewDuration}>
+                      {Math.floor(pendingVideo.durationSeconds / 60)}:
+                      {(pendingVideo.durationSeconds % 60).toString().padStart(2, "0")}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </MediaUploadOverlay>
           ) : null}
 
           <View style={styles.previewActions}>
@@ -1103,6 +1095,9 @@ const styles = StyleSheet.create({
     flex: 1,
     width: "100%",
   },
+  previewMediaStage: {
+    flex: 1,
+  },
   videoPreviewWrap: {
     flex: 1,
     position: "relative",
@@ -1118,10 +1113,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-  },
-  previewUploadWrap: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
   },
   previewOptionsRow: {
     flexDirection: "row",

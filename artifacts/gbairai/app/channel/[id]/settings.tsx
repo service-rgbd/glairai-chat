@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -8,14 +7,21 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Avatar } from "@/components/Avatar";
+import {
+  ChannelFormField,
+  ChannelMenuRow,
+  ChannelPrimaryButton,
+  ChannelScreenHeader,
+  ChannelSection,
+} from "@/modules/channels/components/ChannelFormUi";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
 import type { Channel } from "@/modules/channels/types";
+import { isLikelyNetworkError } from "@/lib/app-network";
 import { useColors } from "@/hooks/useColors";
 
 export default function ChannelSettingsScreen() {
@@ -33,6 +39,7 @@ export default function ChannelSettingsScreen() {
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -42,17 +49,35 @@ export default function ChannelSettingsScreen() {
         setName(result.name);
         setDescription(result.description);
       })
+      .catch((loadError) => {
+        setError(
+          isLikelyNetworkError(loadError)
+            ? "Connexion insuffisante pour charger les paramètres."
+            : loadError instanceof Error
+              ? loadError.message
+              : "Impossible de charger la chaîne",
+        );
+      })
       .finally(() => setLoading(false));
   }, [getChannel, id]);
 
   const handleSave = async () => {
     if (!id) return;
+    setError(null);
     setSaving(true);
     try {
       const result = await updateExistingChannel(id, { name, description });
       setChannel(result.channel);
       await refreshDiscovery();
       router.back();
+    } catch (saveError) {
+      setError(
+        isLikelyNetworkError(saveError)
+          ? "Enregistrement impossible sans connexion internet."
+          : saveError instanceof Error
+            ? saveError.message
+            : "Impossible d'enregistrer",
+      );
     } finally {
       setSaving(false);
     }
@@ -69,20 +94,39 @@ export default function ChannelSettingsScreen() {
           text: "Supprimer",
           style: "destructive",
           onPress: () => {
-            void removeChannel(id).then(async () => {
-              await refreshDiscovery();
-              router.replace("/(tabs)/(main)/channels");
-            });
+            void removeChannel(id)
+              .then(async () => {
+                await refreshDiscovery();
+                router.replace("/(tabs)/(main)/channels");
+              })
+              .catch((deleteError) => {
+                Alert.alert(
+                  "Suppression impossible",
+                  isLikelyNetworkError(deleteError)
+                    ? "Vérifiez votre connexion internet."
+                    : deleteError instanceof Error
+                      ? deleteError.message
+                      : "Une erreur est survenue.",
+                );
+              });
           },
         },
       ],
     );
   };
 
-  if (loading || !channel) {
+  if (loading) {
     return (
       <View style={[styles.loaderRoot, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!channel) {
+    return (
+      <View style={[styles.loaderRoot, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.mutedForeground }}>{error ?? "Chaîne introuvable"}</Text>
       </View>
     );
   }
@@ -95,51 +139,80 @@ export default function ChannelSettingsScreen() {
     );
   }
 
+  const initials = channel.name.slice(0, 2).toUpperCase();
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: topPad + 6, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.75}>
-          <Ionicons name="chevron-back" size={26} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>Paramètres</Text>
-        <View style={{ width: 26 }} />
-      </View>
+      <ChannelScreenHeader title="Gérer la chaîne" topPad={topPad} onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: bottomPad + 24, gap: 16 }}>
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: colors.mutedForeground }]}>Nom</Text>
-          <TextInput
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPad + 28 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Avatar uri={channel.avatarUrl} initials={initials} color="#6D4AFF" size={72} />
+          <View style={styles.profileBody}>
+            <Text style={[styles.profileName, { color: colors.text }]} numberOfLines={1}>
+              {channel.name}
+            </Text>
+            <Text style={[styles.profileMeta, { color: colors.mutedForeground }]}>
+              {channel.followersCount} abonné{channel.followersCount > 1 ? "s" : ""}
+              {channel.category ? ` · ${channel.category}` : ""}
+            </Text>
+          </View>
+        </View>
+
+        <ChannelSection title="Actions rapides">
+          <ChannelMenuRow
+            icon="eye-outline"
+            label="Voir la chaîne publique"
+            onPress={() => router.push(`/channel/${channel.id}`)}
+          />
+          <ChannelMenuRow
+            icon="create-outline"
+            label="Publier une annonce"
+            showDivider
+            onPress={() => router.push(`/channel/${channel.id}`)}
+          />
+        </ChannelSection>
+
+        <ChannelSection title="Profil de la chaîne">
+          <ChannelFormField
+            label="Nom"
             value={name}
             onChangeText={setName}
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+            placeholder="Nom de la chaîne"
+            maxLength={64}
           />
-        </View>
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: colors.mutedForeground }]}>Description</Text>
-          <TextInput
+          <ChannelFormField
+            label="Description"
             value={description}
             onChangeText={setDescription}
+            placeholder="Décrivez votre chaîne"
             multiline
-            style={[
-              styles.input,
-              styles.textArea,
-              { color: colors.text, borderColor: colors.border, backgroundColor: colors.card },
-            ]}
+            maxLength={280}
           />
-        </View>
+        </ChannelSection>
 
-        <TouchableOpacity
-          style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving ? 0.75 : 1 }]}
+        {error ? (
+          <Text style={[styles.errorText, { color: colors.destructive }]}>{error}</Text>
+        ) : null}
+
+        <ChannelPrimaryButton
+          label="Enregistrer les modifications"
           onPress={() => void handleSave()}
-          disabled={saving}
-          activeOpacity={0.85}
-        >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Enregistrer</Text>}
-        </TouchableOpacity>
+          loading={saving}
+          disabled={name.trim().length < 2}
+        />
 
-        <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} activeOpacity={0.85}>
-          <Text style={[styles.deleteText, { color: colors.destructive }]}>Supprimer la chaîne</Text>
-        </TouchableOpacity>
+        <ChannelSection title="Zone sensible">
+          <ChannelMenuRow
+            icon="trash-outline"
+            label="Supprimer la chaîne"
+            destructive
+            onPress={handleDelete}
+          />
+        </ChannelSection>
       </ScrollView>
     </View>
   );
@@ -147,39 +220,22 @@ export default function ChannelSettingsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  loaderRoot: { flex: 1, alignItems: "center", justifyContent: "center" },
-  header: {
+  loaderRoot: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  content: { padding: 16, gap: 18 },
+  profileCard: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 16,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 14,
   },
-  title: { fontSize: 18, fontFamily: "Inter_600SemiBold" },
-  field: { gap: 8 },
-  label: { fontSize: 13, fontFamily: "Inter_500Medium" },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    fontFamily: "Inter_400Regular",
+  profileBody: { flex: 1, gap: 4 },
+  profileName: { fontSize: 20, fontFamily: "Inter_700Bold" },
+  profileMeta: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  errorText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    textAlign: "center",
   },
-  textArea: { minHeight: 100, textAlignVertical: "top" },
-  saveBtn: {
-    height: 50,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
-  },
-  saveText: { color: "#fff", fontSize: 16, fontFamily: "Inter_600SemiBold" },
-  deleteBtn: {
-    height: 50,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  deleteText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
 });

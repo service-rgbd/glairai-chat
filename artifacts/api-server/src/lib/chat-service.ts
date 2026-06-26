@@ -2183,7 +2183,7 @@ class DatabaseChatService implements ChatService {
     }
 
     await this.sendConversationMemberInvites(
-      conversationId,
+        conversationId,
       user.id,
       Array.from(newMemberIds),
     );
@@ -3075,9 +3075,9 @@ class DatabaseChatService implements ChatService {
     const editedContent = isE2eMessageContent(normalizedContent)
       ? normalizedContent
       : encodeEditedTextMessageContent(
-          normalizedContent,
-          new Date().toISOString(),
-        );
+      normalizedContent,
+      new Date().toISOString(),
+    );
 
     await db!
       .update(messagesTable)
@@ -3713,7 +3713,7 @@ class DatabaseChatService implements ChatService {
         voipTokenCount: devices.filter((device) => Boolean(device.voipPushToken)).length,
       },
       "Préparation push appel entrant",
-    );
+      );
 
     const voipSent = await sendVoipIncomingCallPushes(devices, {
       callerName: input.callerName,

@@ -30,6 +30,7 @@ type ChannelsContextValue = {
   feedPosts: ChannelPost[];
   isLoadingDiscovery: boolean;
   isLoadingFeed: boolean;
+  discoveryError: boolean;
   socketConnected: boolean;
   refreshDiscovery: () => Promise<void>;
   refreshFeed: () => Promise<void>;
@@ -61,6 +62,7 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
     queryFn: fetchChannelDiscovery,
     enabled: isAuthenticated,
     staleTime: 30_000,
+    retry: 1,
   });
 
   const feedQuery = useQuery({
@@ -145,6 +147,7 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       feedPosts: feedQuery.data?.posts ?? [],
       isLoadingDiscovery: discoveryQuery.isLoading,
       isLoadingFeed: feedQuery.isLoading,
+      discoveryError: discoveryQuery.isError,
       socketConnected,
       refreshDiscovery,
       refreshFeed,
@@ -165,6 +168,7 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
     [
       discoveryQuery.data,
       discoveryQuery.isLoading,
+      discoveryQuery.isError,
       feedQuery.data,
       feedQuery.isLoading,
       socketConnected,

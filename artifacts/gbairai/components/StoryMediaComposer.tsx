@@ -17,7 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SafeKeyboardAvoidingView as KeyboardAvoidingView } from "@/components/SafeKeyboardAvoidingView";
-import { UploadProgressBanner } from "@/components/UploadProgressBanner";
+import { MediaUploadOverlay } from "@/components/MediaUploadOverlay";
 import type { UploadStatus } from "@/lib/upload-status";
 
 interface StoryMediaComposerProps {
@@ -76,17 +76,19 @@ export function StoryMediaComposer({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={0}
       >
-        {previewUri ? (
-          <Image source={{ uri: previewUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-        ) : (
-          <View style={[StyleSheet.absoluteFillObject, styles.fallbackBg]} />
-        )}
+        <MediaUploadOverlay status={publishStatus} style={StyleSheet.absoluteFillObject}>
+          {previewUri ? (
+            <Image source={{ uri: previewUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+          ) : (
+            <View style={[StyleSheet.absoluteFillObject, styles.fallbackBg]} />
+          )}
 
-        {type === "video" ? (
-          <View style={styles.videoBadge}>
-            <Ionicons name="play" size={22} color="#fff" />
-          </View>
-        ) : null}
+          {type === "video" && !publishStatus ? (
+            <View style={styles.videoBadge}>
+              <Ionicons name="play" size={22} color="#fff" />
+            </View>
+          ) : null}
+        </MediaUploadOverlay>
 
         <LinearGradient
           colors={["rgba(0,0,0,0.55)", "transparent"]}
@@ -114,12 +116,6 @@ export function StoryMediaComposer({
           colors={["transparent", "rgba(0,0,0,0.72)"]}
           style={[styles.bottomGradient, { paddingBottom: captionBottomPadding }]}
         >
-          {publishStatus ? (
-            <View style={styles.uploadWrap}>
-              <UploadProgressBanner status={publishStatus} />
-            </View>
-          ) : null}
-
           <TextInput
             style={styles.captionInput}
             placeholder="Ajouter une légende…"
@@ -198,9 +194,6 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingHorizontal: 16,
     gap: 10,
-  },
-  uploadWrap: {
-    marginBottom: 4,
   },
   captionInput: {
     color: "#fff",

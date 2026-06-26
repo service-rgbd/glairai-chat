@@ -259,32 +259,62 @@ export default function ChannelDetailsScreen() {
             </Text>
           )}
           <View style={styles.infoActions}>
-            <TouchableOpacity
-              style={[styles.infoAction, { borderColor: colors.border }]}
-              onPress={() => void handleFollow()}
-              disabled={followBusy}
-              activeOpacity={0.82}
-            >
-              <Ionicons
-                name={channel.isFollowing ? "notifications" : "notifications-outline"}
-                size={18}
-                color={colors.primary}
-              />
-              <Text style={[styles.infoActionText, { color: colors.text }]}>
-                {channel.isFollowing ? "Notifications actives" : "Suivre et notifier"}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.infoAction, { borderColor: colors.border }]}
-              onPress={handleReportChannel}
-              disabled={reporting}
-              activeOpacity={0.82}
-            >
-              <Ionicons name="flag-outline" size={18} color={colors.destructive} />
-              <Text style={[styles.infoActionText, { color: colors.destructive }]}>
-                {reporting ? "Envoi..." : "Signaler"}
-              </Text>
-            </TouchableOpacity>
+            {canPublish ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.infoAction, styles.infoActionPrimary, { backgroundColor: colors.primary }]}
+                  onPress={() => router.push(`/channel/${channel.id}/settings`)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="settings-outline" size={18} color="#fff" />
+                  <Text style={[styles.infoActionText, { color: "#fff" }]}>Gérer la chaîne</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.infoAction, { borderColor: colors.border }]}
+                  onPress={() => void handleFollow()}
+                  disabled={followBusy}
+                  activeOpacity={0.82}
+                >
+                  <Ionicons
+                    name={channel.isFollowing ? "notifications" : "notifications-outline"}
+                    size={18}
+                    color={colors.primary}
+                  />
+                  <Text style={[styles.infoActionText, { color: colors.text }]}>
+                    {channel.isFollowing ? "Notifications actives" : "Suivre et notifier"}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[styles.infoAction, { borderColor: colors.border }]}
+                  onPress={() => void handleFollow()}
+                  disabled={followBusy}
+                  activeOpacity={0.82}
+                >
+                  <Ionicons
+                    name={channel.isFollowing ? "notifications" : "notifications-outline"}
+                    size={18}
+                    color={colors.primary}
+                  />
+                  <Text style={[styles.infoActionText, { color: colors.text }]}>
+                    {channel.isFollowing ? "Notifications actives" : "Suivre et notifier"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.infoAction, { borderColor: colors.border }]}
+                  onPress={handleReportChannel}
+                  disabled={reporting}
+                  activeOpacity={0.82}
+                >
+                  <Ionicons name="flag-outline" size={18} color={colors.destructive} />
+                  <Text style={[styles.infoActionText, { color: colors.destructive }]}>
+                    {reporting ? "Envoi..." : "Signaler"}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
 
@@ -457,6 +487,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
     paddingHorizontal: 10,
+  },
+  infoActionPrimary: {
+    borderWidth: 0,
   },
   infoActionText: {
     fontSize: 13,

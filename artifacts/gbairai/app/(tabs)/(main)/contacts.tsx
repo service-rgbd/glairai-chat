@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
+import { NetworkStatusChip } from "@/components/NetworkStatusChip";
 import { SearchBar } from "@/components/SearchBar";
 import type { ComposeContactOption } from "@/contexts/chats-types";
 import { useChats } from "@/contexts/chats-context-ref";
@@ -175,7 +176,10 @@ export default function ContactsScreen() {
           { paddingTop: topPad + 6, borderBottomColor: colors.border, backgroundColor: colors.headerBg },
         ]}
       >
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Contacts</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Contacts</Text>
+          <NetworkStatusChip />
+        </View>
       </View>
 
       <SearchBar value={search} onChangeText={setSearch} placeholder="Rechercher un contact..." />
@@ -289,6 +293,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   headerTitle: {
     fontSize: 24,
