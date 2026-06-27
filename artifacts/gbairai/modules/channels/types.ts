@@ -15,6 +15,7 @@ export type Channel = {
   updatedAt: string;
   isFollowing: boolean;
   role: ChannelRole;
+  isOfficial?: boolean;
 };
 
 export type ChannelPost = {

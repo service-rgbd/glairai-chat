@@ -19,6 +19,7 @@ import { ChannelSearchBar } from "@/modules/channels/components/ChannelSearchBar
 import { NetworkStatusChip } from "@/components/NetworkStatusChip";
 import { useNetworkStatus } from "@/contexts/NetworkStatusContext";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
+import { isOfficialChannel } from "@/modules/channels/lib/channel-official";
 import type { Channel, ChannelPost } from "@/modules/channels/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { getDisplayMediaUrl } from "@/lib/media";
@@ -74,13 +75,16 @@ export default function ChannelsListScreen() {
 
   const ownedChannels = useMemo(() => {
     const mineSection = discoverySections.find((section) => section.title === "Mes chaînes");
-    if (mineSection?.channels.length) {
-      return mineSection.channels;
+    const fromSection = (mineSection?.channels ?? []).filter((channel) => !isOfficialChannel(channel));
+
+    if (fromSection.length) {
+      return fromSection;
     }
 
     const byId = new Map<string, Channel>();
     for (const section of discoverySections) {
       for (const channel of section.channels) {
+        if (isOfficialChannel(channel)) continue;
         if (channel.role === "owner" || channel.ownerId === currentUser?.id) {
           byId.set(channel.id, channel);
         }

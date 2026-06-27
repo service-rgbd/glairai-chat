@@ -20,6 +20,7 @@ import {
   ChannelSection,
 } from "@/modules/channels/components/ChannelFormUi";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
+import { canManageChannel, isOfficialChannel } from "@/modules/channels/lib/channel-official";
 import type { Channel } from "@/modules/channels/types";
 import { isLikelyNetworkError } from "@/lib/app-network";
 import { useColors } from "@/hooks/useColors";
@@ -131,10 +132,14 @@ export default function ChannelSettingsScreen() {
     );
   }
 
-  if (channel.role !== "owner") {
+  if (!canManageChannel(channel)) {
     return (
       <View style={[styles.loaderRoot, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.mutedForeground }}>Accès réservé au propriétaire</Text>
+        <Text style={{ color: colors.mutedForeground }}>
+          {isOfficialChannel(channel)
+            ? "Cette chaîne officielle est un exemple en lecture seule."
+            : "Accès réservé au propriétaire"}
+        </Text>
       </View>
     );
   }

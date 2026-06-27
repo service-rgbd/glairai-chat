@@ -188,9 +188,6 @@ async function ensureDemoOwner() {
 
   if (existing) return existing.id;
 
-  const [firstUser] = await db!.select({ id: usersTable.id }).from(usersTable).limit(1);
-  if (firstUser) return firstUser.id;
-
   await db!.insert(usersTable).values({
     id: DEMO_OWNER_ID,
     phone: "+22500000000",

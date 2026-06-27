@@ -22,6 +22,7 @@ import { ChannelPostCard } from "@/modules/channels/components/ChannelPostCard";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
 import { uploadChannelImage } from "@/modules/channels/lib/upload-image";
 import type { Channel, ChannelPost } from "@/modules/channels/types";
+import { canPublishOnChannel, isOfficialChannel } from "@/modules/channels/lib/channel-official";
 import { getDisplayMediaUrl } from "@/lib/media";
 import { useColors } from "@/hooks/useColors";
 
@@ -75,7 +76,8 @@ export default function ChannelDetailsScreen() {
     void load();
   }, [load]);
 
-  const canPublish = channel?.role === "owner" || channel?.role === "admin";
+  const canPublish = channel ? canPublishOnChannel(channel) : false;
+  const isOfficial = channel ? isOfficialChannel(channel) : false;
 
   const handleFollow = async () => {
     if (!channel) return;
@@ -215,7 +217,7 @@ export default function ChannelDetailsScreen() {
             </Text>
           </View>
         </View>
-        {(channel.role === "owner" || channel.role === "admin") && (
+        {(channel.role === "owner" || channel.role === "admin") && !isOfficial ? (
           <TouchableOpacity
             onPress={() => router.push(`/channel/${channel.id}/settings`)}
             style={styles.backBtn}
@@ -258,6 +260,14 @@ export default function ChannelDetailsScreen() {
               Aucune description pour cette chaîne.
             </Text>
           )}
+          {isOfficial ? (
+            <View style={[styles.officialBadge, { backgroundColor: `${colors.primary}14`, borderColor: `${colors.primary}33` }]}>
+              <Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} />
+              <Text style={[styles.officialBadgeText, { color: colors.primary }]}>
+                Chaîne officielle — exemple en lecture seule
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.infoActions}>
             {canPublish ? (
               <>
@@ -499,6 +509,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     fontFamily: "Inter_400Regular",
+  },
+  officialBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  officialBadgeText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_500Medium",
   },
   empty: {
     textAlign: "center",

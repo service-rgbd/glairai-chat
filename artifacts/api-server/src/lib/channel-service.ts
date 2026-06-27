@@ -26,7 +26,7 @@ import {
 import { chatService } from "./chat-service";
 import { notifyChannelSubscribersOfNewPost } from "./channel-notifications";
 import { publishChannelEvent, type ChannelRealtimePost } from "./channel-realtime";
-import { formatFollowersCount } from "./channel-utils";
+import { formatFollowersCount, isOfficialChannel } from "./channel-utils";
 
 export { formatFollowersCount };
 
@@ -47,6 +47,7 @@ export type ChannelDto = {
   updatedAt: string;
   isFollowing: boolean;
   role: ChannelRole;
+  isOfficial: boolean;
 };
 
 export type ChannelPostDto = {
@@ -109,7 +110,20 @@ class ChannelService {
       updatedAt: toIso(row.updatedAt),
       isFollowing: options.isFollowing,
       role: options.role,
+      isOfficial: isOfficialChannel(row.id),
     };
+  }
+
+  private async resolveFollowerRole(channelId: string, userId: string): Promise<"follower" | "visitor"> {
+    const database = this.ensureDb();
+    const [follower] = await database
+      .select()
+      .from(channelFollowersTable)
+      .where(
+        and(eq(channelFollowersTable.channelId, channelId), eq(channelFollowersTable.userId, userId)),
+      )
+      .limit(1);
+    return follower ? "follower" : "visitor";
   }
 
   private mapPost(
@@ -141,6 +155,10 @@ class ChannelService {
       .limit(1);
     if (!channel) throw new Error("Chaîne introuvable");
 
+    if (isOfficialChannel(channelId)) {
+      return this.resolveFollowerRole(channelId, userId);
+    }
+
     if (channel.ownerId === userId) return "owner";
 
     const [admin] = await database
@@ -150,16 +168,7 @@ class ChannelService {
       .limit(1);
     if (admin) return admin.role;
 
-    const [follower] = await database
-      .select()
-      .from(channelFollowersTable)
-      .where(
-        and(eq(channelFollowersTable.channelId, channelId), eq(channelFollowersTable.userId, userId)),
-      )
-      .limit(1);
-    if (follower) return "follower";
-
-    return "visitor";
+    return this.resolveFollowerRole(channelId, userId);
   }
 
   private async requireChannel(channelId: string) {
@@ -174,6 +183,9 @@ class ChannelService {
   }
 
   private async requireCanPublish(channelId: string, userId: string) {
+    if (isOfficialChannel(channelId)) {
+      throw new Error("Cette chaîne officielle est en lecture seule");
+    }
     const role = await this.resolveRole(channelId, userId);
     if (role !== "owner" && role !== "admin") {
       throw new Error("Seuls les administrateurs peuvent publier sur cette chaîne");
@@ -181,6 +193,9 @@ class ChannelService {
   }
 
   private async requireCanManage(channelId: string, userId: string) {
+    if (isOfficialChannel(channelId)) {
+      throw new Error("Cette chaîne officielle est en lecture seule");
+    }
     const role = await this.resolveRole(channelId, userId);
     if (role !== "owner") {
       throw new Error("Seul le propriétaire peut gérer cette chaîne");
@@ -286,7 +301,15 @@ class ChannelService {
     const channels = rows.slice(0, limit).map((row) =>
       this.mapChannel(row, {
         isFollowing: followingSet.has(row.id),
-        role: row.ownerId === userId ? "owner" : followingSet.has(row.id) ? "follower" : "visitor",
+        role: isOfficialChannel(row.id)
+          ? followingSet.has(row.id)
+            ? "follower"
+            : "visitor"
+          : row.ownerId === userId
+            ? "owner"
+            : followingSet.has(row.id)
+              ? "follower"
+              : "visitor",
       }),
     );
 
@@ -803,10 +826,11 @@ class ChannelService {
       .orderBy(desc(channelsTable.updatedAt))
       .limit(10);
 
-    if (ownedRows.length) {
+    const ownedChannels = ownedRows.filter((row) => !isOfficialChannel(row.id));
+    if (ownedChannels.length) {
       sections.push({
         title: "Mes chaînes",
-        channels: ownedRows.map((row) =>
+        channels: ownedChannels.map((row) =>
           this.mapChannel(row, { isFollowing: false, role: "owner" }),
         ),
       });
