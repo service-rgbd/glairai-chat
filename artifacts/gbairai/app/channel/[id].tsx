@@ -225,7 +225,7 @@ export default function ChannelDetailsScreen() {
           >
             <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: bottomPad + 120 }}>

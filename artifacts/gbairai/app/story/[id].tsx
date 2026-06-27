@@ -100,7 +100,7 @@ function StoryVideoPlayer({ url, paused, onProgress, onEnded }: StoryVideoPlayer
 }
 
 export default function StoryScreen() {
-  const { id, userId: userIdParam, queue: queueParam } = useLocalSearchParams<{
+  const { id: routeStoryId, userId: userIdParam, queue: queueParam } = useLocalSearchParams<{
     id: string;
     userId?: string;
     queue?: string;
@@ -112,9 +112,19 @@ export default function StoryScreen() {
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
   const currentUserId = currentUser?.id ?? "me";
 
+  const [activeStoryId, setActiveStoryId] = useState(routeStoryId);
+  const [viewerUserId, setViewerUserId] = useState(userIdParam);
+
+  useEffect(() => {
+    setActiveStoryId(routeStoryId);
+    if (userIdParam) {
+      setViewerUserId(userIdParam);
+    }
+  }, [routeStoryId, userIdParam]);
+
   const storySnapshotRef = useRef<{ story: GStory; user: GUser } | null>(null);
-  const liveStory = stories.find((story) => story.id === id);
-  const ownerUserId = liveStory?.userId ?? userIdParam ?? storySnapshotRef.current?.story.userId;
+  const liveStory = stories.find((story) => story.id === activeStoryId);
+  const ownerUserId = liveStory?.userId ?? viewerUserId ?? storySnapshotRef.current?.story.userId;
   const liveUser = ownerUserId ? users[ownerUserId] : undefined;
 
   if (liveStory && liveUser) {
@@ -171,6 +181,16 @@ export default function StoryScreen() {
     });
   };
 
+  const navigateToStory = (target: { storyId: string; userId: string; queue: string[] }) => {
+    if (target.userId === ownerUserId) {
+      hasAdvancedRef.current = false;
+      setActiveStoryId(target.storyId);
+      return;
+    }
+
+    replaceStoryViewer(target);
+  };
+
   const advanceStory = () => {
     if (hasAdvancedRef.current || !story || !ownerUserId) return;
     hasAdvancedRef.current = true;
@@ -185,7 +205,7 @@ export default function StoryScreen() {
     });
 
     if (next) {
-      replaceStoryViewer(next);
+      navigateToStory(next);
       return;
     }
 
@@ -209,7 +229,7 @@ export default function StoryScreen() {
     });
 
     if (previous) {
-      replaceStoryViewer(previous);
+      navigateToStory(previous);
       return;
     }
 
@@ -224,6 +244,7 @@ export default function StoryScreen() {
   useEffect(() => {
     if (!story) return;
     hasAdvancedRef.current = false;
+    setReactionBurst(null);
     addStoryView(story.id);
     progress.setValue(0);
 
@@ -245,7 +266,7 @@ export default function StoryScreen() {
     return () => {
       progressAnimationRef.current?.stop();
     };
-  }, [id, story?.type, resolvedMediaUrl]);
+  }, [activeStoryId, story?.type, resolvedMediaUrl]);
 
   const handleVideoProgress = useCallback((ratio: number) => {
     progress.setValue(ratio);
@@ -321,9 +342,15 @@ export default function StoryScreen() {
         {story.type === "text" ? (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: story.backgroundColor || "#0F172A" }]} />
         ) : story.type === "image" && resolvedMediaUrl ? (
-          <Image source={{ uri: resolvedMediaUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <Image
+            key={activeStoryId}
+            source={{ uri: resolvedMediaUrl }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+          />
         ) : story.type === "video" && resolvedMediaUrl ? (
           <StoryVideoPlayer
+            key={activeStoryId}
             url={resolvedMediaUrl}
             paused={isReplyFocused}
             onProgress={handleVideoProgress}
