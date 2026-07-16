@@ -35,6 +35,17 @@ router.patch("/me", requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
+router.delete("/me", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const result = await chatService.deleteCurrentUser(req.authToken!);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Impossible de supprimer le compte",
+    });
+  }
+});
+
 router.post("/presence/heartbeat", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const input = UpdatePresenceHeartbeatBody.parse(req.body);

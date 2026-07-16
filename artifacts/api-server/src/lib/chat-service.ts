@@ -240,6 +240,7 @@ export interface ChatService {
     updates: Partial<Pick<UserProfile, "name" | "avatarUrl" | "bio" | "statusText">> &
       Partial<UserSettings>,
   ): Awaitable<UserProfile>;
+  deleteCurrentUser(token: string): Awaitable<{ success: boolean }>;
   updatePresenceHeartbeat(token: string, isOnline: boolean): Awaitable<PresenceSnapshot>;
   listConversations(token: string): Awaitable<{ conversations: ConversationSummary[] }>;
   createConversation(
@@ -956,6 +957,17 @@ class InMemoryChatService {
     user.isOnboarded = Boolean(user.name.trim());
     this.users.set(user.id, user);
     return this.toUserProfile(user.id, user.id);
+  }
+
+  deleteCurrentUser(token: string) {
+    const user = this.requireUserByToken(token);
+    for (const [hash, session] of this.sessions.entries()) {
+      if (session.userId === user.id) {
+        this.sessions.delete(hash);
+      }
+    }
+    this.users.delete(user.id);
+    return { success: true };
   }
 
   updatePresenceHeartbeat(token: string, isOnline: boolean) {
@@ -1899,6 +1911,14 @@ class DatabaseChatService implements ChatService {
       .where(eq(usersTable.id, user.id));
 
     return this.toUserProfile(user.id, user.id);
+  }
+
+  async deleteCurrentUser(token: string) {
+    const user = await this.requireUserByToken(token);
+    await db!.delete(sessionsTable).where(eq(sessionsTable.userId, user.id));
+    await db!.delete(deviceTokensTable).where(eq(deviceTokensTable.userId, user.id));
+    await db!.delete(usersTable).where(eq(usersTable.id, user.id));
+    return { success: true };
   }
 
   async updatePresenceHeartbeat(token: string, isOnline: boolean) {
