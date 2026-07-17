@@ -2,9 +2,24 @@ import * as ImagePicker from "expo-image-picker";
 
 import {
   createMediaUploadTarget,
-  getUploadDisplayUrl,
+  getDisplayMediaUrl,
   uploadFileToSignedUrl,
 } from "@/lib/media";
+
+export function isLocalProfilePhotoUri(uri: string | null | undefined) {
+  if (!uri?.trim()) return false;
+  return /^(file:|content:|ph:|assets-library:)/i.test(uri.trim());
+}
+
+export function isRemoteProfilePhotoUri(uri: string | null | undefined) {
+  if (!uri?.trim()) return false;
+  const trimmed = uri.trim();
+  return (
+    trimmed.startsWith("avatars/") ||
+    trimmed.includes("/api/media/public") ||
+    /^https?:\/\//i.test(trimmed)
+  );
+}
 
 export async function pickProfilePhotoFromLibrary() {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -51,5 +66,10 @@ export async function uploadProfilePhoto(authToken: string, localUri: string, mi
     mimeType,
   });
   await uploadFileToSignedUrl(target.uploadUrl, localUri, mimeType);
-  return getUploadDisplayUrl(authToken, target.key, target.publicUrl);
+  return target.key;
+}
+
+export function getProfilePhotoDisplayUrl(avatar: string | null | undefined) {
+  if (!avatar?.trim()) return null;
+  return getDisplayMediaUrl(avatar, avatar);
 }

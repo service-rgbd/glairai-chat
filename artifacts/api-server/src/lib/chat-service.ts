@@ -45,7 +45,20 @@ import {
   type GroupSettings,
 } from "./group-settings";
 import { logger } from "./logger";
+import { normalizeAvatarStorageKey } from "./media-service";
 import { sendOtpSms, shouldExposeOtpDemoCode } from "./sms-service";
+
+function resolveStoredAvatarUrl(value: string | null | undefined) {
+  if (!value?.trim()) return null;
+  return normalizeAvatarStorageKey(value) ?? value.trim();
+}
+
+function normalizeAvatarForStorage(value: string | null | undefined) {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return normalizeAvatarStorageKey(trimmed);
+}
 
 type LastSeenVisibility = "everyone" | "contacts" | "nobody";
 type ChatFontScale = "small" | "medium" | "large";
@@ -940,7 +953,9 @@ class InMemoryChatService {
     const user = this.requireUserByToken(token);
     user.name = updates.name ?? user.name;
     user.avatarUrl =
-      updates.avatarUrl === undefined ? user.avatarUrl : updates.avatarUrl;
+      updates.avatarUrl === undefined
+        ? user.avatarUrl
+        : normalizeAvatarForStorage(updates.avatarUrl);
     user.bio = updates.bio ?? user.bio;
     user.statusText = updates.statusText ?? user.statusText;
     user.settings = {
@@ -1505,7 +1520,7 @@ class InMemoryChatService {
       phone: user.phone,
       countryCode: user.countryCode,
       name: user.name || user.phone,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: resolveStoredAvatarUrl(user.avatarUrl),
       bio: user.bio,
       statusText: user.statusText,
       initials: initialsFromName(user.name || user.phone),
@@ -1929,7 +1944,10 @@ class DatabaseChatService implements ChatService {
       .update(usersTable)
       .set({
         name: nextName,
-        avatarUrl: updates.avatarUrl === undefined ? user.avatarUrl : updates.avatarUrl,
+        avatarUrl:
+          updates.avatarUrl === undefined
+            ? user.avatarUrl
+            : normalizeAvatarForStorage(updates.avatarUrl),
         bio: updates.bio ?? user.bio,
         statusText: updates.statusText ?? user.statusText,
         lastSeenVisibility: updates.lastSeenVisibility ?? user.lastSeenVisibility,
@@ -4228,7 +4246,7 @@ class DatabaseChatService implements ChatService {
       phone: user.phone,
       countryCode: user.countryCode,
       name: user.name || user.phone,
-      avatarUrl: user.avatarUrl,
+      avatarUrl: resolveStoredAvatarUrl(user.avatarUrl),
       bio: user.bio,
       statusText: user.statusText,
       initials: initialsFromName(user.name || user.phone),

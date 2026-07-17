@@ -53,6 +53,59 @@ export type MediaCategory =
   | "story-image"
   | "story-video";
 
+const MEDIA_KEY_PREFIX = /^(chat-media|stories|avatars|voice-notes)\//;
+
+export function extractMediaStorageKey(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  if (MEDIA_KEY_PREFIX.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const keyParam = parsed.searchParams.get("key")?.trim();
+    if (keyParam && MEDIA_KEY_PREFIX.test(keyParam)) {
+      return decodeURIComponent(keyParam);
+    }
+
+    const pathname = parsed.pathname.replace(/^\/+/, "");
+    if (MEDIA_KEY_PREFIX.test(pathname)) {
+      return decodeURIComponent(pathname);
+    }
+  } catch {
+    if (trimmed.startsWith("/api/media/public")) {
+      try {
+        const keyParam = new URL(trimmed, "https://gbairai.local").searchParams
+          .get("key")
+          ?.trim();
+        if (keyParam && MEDIA_KEY_PREFIX.test(keyParam)) {
+          return decodeURIComponent(keyParam);
+        }
+      } catch {
+        // Ignore malformed proxy paths.
+      }
+    }
+  }
+
+  return null;
+}
+
+export function normalizeAvatarStorageKey(value?: string | null) {
+  if (!value?.trim()) return null;
+  if (/^(file:|content:|ph:|assets-library:)/i.test(value.trim())) {
+    return null;
+  }
+
+  const key = extractMediaStorageKey(value);
+  if (key?.startsWith("avatars/")) {
+    return key;
+  }
+
+  return null;
+}
+
 function buildMediaKey(
   category: MediaCategory,
   userId: string,

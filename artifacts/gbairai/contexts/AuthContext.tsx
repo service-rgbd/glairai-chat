@@ -8,6 +8,7 @@ import {
   setOtpDemoRequests,
   updateCurrentUser,
   verifyOtp,
+  customFetch,
   type CountryOption,
   type UpdateProfileInput,
   type UserSettings,
@@ -20,9 +21,12 @@ import {
   getDeviceRegionCode,
   resolvePreferredCountryCode,
 } from "@/lib/geo-country";
-import { clearQueryCache } from "@/lib/query-client";
+import { clearQueryCache, queryClient } from "@/lib/query-client";
 import { ensureCacheOwner, purgeOfflineCacheForUser } from "@/lib/offline-cache";
+import { clearArchivedAccessPassword } from "@/lib/archived-access";
 import { setMediaCachePolicy } from "@/lib/media-cache-policy";
+import { syncAndroidNotificationVibration } from "@/lib/notifications";
+import { clearTwoFactorPin } from "@/lib/two-factor-auth";
 import {
   resetStorageWriteGuard,
   safeGetItem,
@@ -65,6 +69,7 @@ interface AuthContextType {
   updateProfile: (updates: Partial<AuthUser>) => Promise<void>;
   registerPushDevice: (pushToken: string, deviceName: string, voipPushToken?: string) => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -268,6 +273,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [currentUser?.id, currentUser?.settings.autoDownloadMedia, currentUser?.settings.lowDataMode]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    void syncAndroidNotificationVibration(currentUser.settings.vibrationEnabled ?? true);
+  }, [currentUser?.id, currentUser?.settings.vibrationEnabled]);
+
   const setPendingPhoneSelection = (
     phone: string,
     countryCode = pendingCountryCode,
@@ -325,6 +335,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const mapped = mapUser(updated);
     setCurrentUser(mapped);
     await safeSetItem(USER_STORAGE_KEY, JSON.stringify(mapped));
+    if (avatar) {
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
   };
 
   const updateProfile = async (updates: Partial<AuthUser>) => {
@@ -349,6 +362,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const mapped = mapUser(updated);
     setCurrentUser(mapped);
     await safeSetItem(USER_STORAGE_KEY, JSON.stringify(mapped));
+    if (updates.avatar !== undefined) {
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    }
   };
 
   const registerPushDevice = async (
@@ -378,6 +394,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCurrentUser(null);
   };
 
+  const deleteAccount = async () => {
+    if (!currentUser) return;
+    const userId = currentUser.id;
+    await customFetch<{ success: boolean }>("/api/me", { method: "DELETE" });
+    await purgeOfflineCacheForUser(userId);
+    clearQueryCache();
+    await Promise.all([clearTwoFactorPin(userId), clearArchivedAccessPassword(userId)]);
+    await logout();
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -398,6 +424,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         updateProfile,
         registerPushDevice,
         logout,
+        deleteAccount,
       }}
     >
       {children}

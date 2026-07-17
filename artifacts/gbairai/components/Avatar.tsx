@@ -30,7 +30,7 @@ export function Avatar({ uri, initials, color, size = 50, showOnline = false, is
     <View style={{ width: size, height: size }}>
       {shouldRenderImage && resolvedUri ? (
         <Image
-          source={{ uri: resolvedUri }}
+          source={{ uri: resolvedUri, cacheKey: resolvedUri }}
           style={{ width: size, height: size, borderRadius: size / 2 }}
           contentFit="cover"
           cachePolicy="memory-disk"

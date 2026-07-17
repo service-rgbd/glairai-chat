@@ -10,17 +10,47 @@ function buildMediaProxyUrl(key: string) {
   return `${getApiBaseUrl()}/api/media/public?key=${encodeURIComponent(key)}`;
 }
 
-function extractMediaKeyFromPublicUrl(url?: string | null) {
-  if (!url?.trim()) return null;
+const MEDIA_KEY_PREFIX = /^(chat-media|stories|avatars|voice-notes)\//;
+
+export function extractMediaStorageKey(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  if (MEDIA_KEY_PREFIX.test(trimmed)) {
+    return trimmed;
+  }
+
   try {
-    const pathname = new URL(url.trim()).pathname.replace(/^\/+/, "");
-    if (/^(chat-media|stories|avatars|voice-notes)\//.test(pathname)) {
+    const parsed = new URL(trimmed);
+    const keyParam = parsed.searchParams.get("key")?.trim();
+    if (keyParam && MEDIA_KEY_PREFIX.test(keyParam)) {
+      return decodeURIComponent(keyParam);
+    }
+
+    const pathname = parsed.pathname.replace(/^\/+/, "");
+    if (MEDIA_KEY_PREFIX.test(pathname)) {
       return decodeURIComponent(pathname);
     }
   } catch {
-    // Ignore malformed URLs.
+    if (trimmed.startsWith("/api/media/public")) {
+      try {
+        const keyParam = new URL(trimmed, "https://gbairai.local").searchParams
+          .get("key")
+          ?.trim();
+        if (keyParam && MEDIA_KEY_PREFIX.test(keyParam)) {
+          return decodeURIComponent(keyParam);
+        }
+      } catch {
+        // Ignore malformed proxy paths.
+      }
+    }
   }
+
   return null;
+}
+
+function extractMediaKeyFromPublicUrl(url?: string | null) {
+  return extractMediaStorageKey(url);
 }
 
 export function isStableDisplayUrl(url?: string | null) {
@@ -32,14 +62,19 @@ export function isStableDisplayUrl(url?: string | null) {
 }
 
 export function getDisplayMediaUrl(key: string, url?: string | null) {
-  if (url?.trim() && isStableDisplayUrl(url)) {
-    return url.trim();
-  }
-  const mediaKey = key?.trim() || extractMediaKeyFromPublicUrl(url);
+  const mediaKey = key?.trim() || extractMediaStorageKey(url);
   if (mediaKey) {
     return buildMediaProxyUrl(mediaKey);
   }
-  return url?.trim() ?? "";
+
+  const trimmed = url?.trim();
+  if (!trimmed) return "";
+
+  if (/^(file:|blob:|data:|content:|ph:|assets-library:)/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return trimmed;
 }
 
 export async function getUploadDisplayUrl(

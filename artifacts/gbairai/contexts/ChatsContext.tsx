@@ -876,7 +876,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     queryFn: () => listConversations(),
     enabled: isAuthenticated && queryHydrated,
     staleTime: CONVERSATIONS_STALE_MS,
-    refetchOnMount: false,
+    refetchOnMount: "always",
   });
 
   const storiesQuery = useQuery({
@@ -1429,6 +1429,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             : contact,
         ),
       );
+
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     });
     socket.on("story.created", (event?: RealtimeSocketEvent) => {
       if (event?.story) {

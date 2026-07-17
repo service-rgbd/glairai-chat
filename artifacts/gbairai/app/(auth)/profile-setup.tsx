@@ -13,11 +13,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import {
+  isLocalProfilePhotoUri,
+  uploadProfilePhoto,
+} from "@/lib/profile-photo";
 
 export default function ProfileSetupScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { currentUser, setupProfile, logout } = useAuth();
+  const { currentUser, setupProfile, logout, authToken } = useAuth();
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
@@ -35,11 +39,18 @@ export default function ProfileSetupScreen() {
   const handleFinish = async () => {
     if (!name.trim()) return;
     setLoading(true);
-    await setupProfile(name.trim(), avatar, bio.trim());
-    setLoading(false);
-    setTimeout(() => {
-      router.replace("/");
-    }, 0);
+    try {
+      let nextAvatar = avatar;
+      if (avatar && isLocalProfilePhotoUri(avatar) && authToken) {
+        nextAvatar = await uploadProfilePhoto(authToken, avatar);
+      }
+      await setupProfile(name.trim(), nextAvatar, bio.trim());
+      setTimeout(() => {
+        router.replace("/");
+      }, 0);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
