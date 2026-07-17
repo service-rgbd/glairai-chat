@@ -277,6 +277,17 @@ type RealtimeSocketEvent = {
       lastSeenAt: string | null;
     };
   };
+  profile?: {
+    userId: string;
+    snapshot: {
+      name: string;
+      avatarUrl: string | null;
+      bio: string;
+      statusText: string;
+      initials: string;
+      color: string;
+    };
+  };
 };
 type OutboxItem = {
   localId: string;
@@ -364,6 +375,39 @@ function patchParticipantPresence(
                 isOnline: snapshot.isOnline,
                 lastSeenAt: snapshot.lastSeenAt,
               },
+            },
+          }
+        : participant,
+    ),
+  }));
+}
+
+function patchParticipantProfile(
+  conversations: ConversationSummary[],
+  userId: string,
+  snapshot: {
+    name: string;
+    avatarUrl: string | null;
+    bio: string;
+    statusText: string;
+    initials: string;
+    color: string;
+  },
+) {
+  return conversations.map((conversation) => ({
+    ...conversation,
+    participants: conversation.participants.map((participant) =>
+      participant.userId === userId
+        ? {
+            ...participant,
+            profile: {
+              ...participant.profile,
+              name: snapshot.name,
+              avatarUrl: snapshot.avatarUrl,
+              bio: snapshot.bio,
+              statusText: snapshot.statusText,
+              initials: snapshot.initials,
+              color: snapshot.color,
             },
           }
         : participant,
@@ -1357,6 +1401,34 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           conversations: patchParticipantPresence(current.conversations, userId, snapshot),
         };
       });
+    });
+    socket.on("profile.updated", (event?: RealtimeSocketEvent) => {
+      const userId = event?.profile?.userId;
+      const snapshot = event?.profile?.snapshot;
+      if (!userId || !snapshot) return;
+
+      queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => {
+        if (!current) return current;
+        return {
+          conversations: patchParticipantProfile(current.conversations, userId, snapshot),
+        };
+      });
+
+      setComposeContactsSnapshot((current) =>
+        current.map((contact) =>
+          contact.userId === userId
+            ? {
+                ...contact,
+                name: snapshot.name,
+                avatar: snapshot.avatarUrl,
+                bio: snapshot.bio,
+                status: snapshot.statusText,
+                initials: snapshot.initials,
+                color: snapshot.color,
+              }
+            : contact,
+        ),
+      );
     });
     socket.on("story.created", (event?: RealtimeSocketEvent) => {
       if (event?.story) {

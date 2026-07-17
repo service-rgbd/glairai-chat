@@ -91,6 +91,11 @@ export interface UserProfile {
   presence: PresenceSnapshot;
 }
 
+export type ProfileBroadcastSnapshot = Pick<
+  UserProfile,
+  "name" | "avatarUrl" | "bio" | "statusText" | "initials" | "color"
+>;
+
 export interface ConversationParticipant {
   userId: string;
   profile: UserProfile;
@@ -158,6 +163,7 @@ export interface RealtimeEvent {
     | "message.reaction"
     | "message.receipt"
     | "presence.updated"
+    | "profile.updated"
     | "conversation.created"
     | "conversation.updated"
     | "conversation.deleted"
@@ -181,6 +187,7 @@ export interface RealtimeEvent {
   reactions?: MessageReactionSummary[];
   receipt?: MessageReceipt;
   presence?: { userId: string; snapshot: PresenceSnapshot };
+  profile?: { userId: string; snapshot: ProfileBroadcastSnapshot };
   conversation?: ConversationSummary;
   groupMemberInvite?: GroupMemberInviteSummary;
   removedUserId?: string;
@@ -956,7 +963,36 @@ class InMemoryChatService {
     };
     user.isOnboarded = Boolean(user.name.trim());
     this.users.set(user.id, user);
-    return this.toUserProfile(user.id, user.id);
+    const profile = this.toUserProfile(user.id, user.id);
+    const profileFieldsChanged =
+      updates.avatarUrl !== undefined ||
+      updates.name !== undefined ||
+      updates.bio !== undefined ||
+      updates.statusText !== undefined;
+    if (profileFieldsChanged) {
+      const participantIds = new Set<string>();
+      for (const conversation of this.getMemberConversations(user.id)) {
+        for (const participantId of conversation.participantIds) {
+          participantIds.add(participantId);
+        }
+      }
+      this.publish({
+        type: "profile.updated",
+        participantIds: Array.from(participantIds),
+        profile: {
+          userId: user.id,
+          snapshot: {
+            name: profile.name,
+            avatarUrl: profile.avatarUrl,
+            bio: profile.bio,
+            statusText: profile.statusText,
+            initials: profile.initials,
+            color: profile.color,
+          },
+        },
+      });
+    }
+    return profile;
   }
 
   deleteCurrentUser(token: string) {
@@ -1910,7 +1946,31 @@ class DatabaseChatService implements ChatService {
       })
       .where(eq(usersTable.id, user.id));
 
-    return this.toUserProfile(user.id, user.id);
+    const profile = await this.toUserProfile(user.id, user.id);
+    const profileFieldsChanged =
+      updates.avatarUrl !== undefined ||
+      updates.name !== undefined ||
+      updates.bio !== undefined ||
+      updates.statusText !== undefined;
+    if (profileFieldsChanged) {
+      const participantIds = await this.listPresenceSubscribers(user.id);
+      this.publish({
+        type: "profile.updated",
+        participantIds,
+        profile: {
+          userId: user.id,
+          snapshot: {
+            name: profile.name,
+            avatarUrl: profile.avatarUrl,
+            bio: profile.bio,
+            statusText: profile.statusText,
+            initials: profile.initials,
+            color: profile.color,
+          },
+        },
+      });
+    }
+    return profile;
   }
 
   async deleteCurrentUser(token: string) {
