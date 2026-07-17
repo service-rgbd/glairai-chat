@@ -144,6 +144,36 @@ export function resolveMediaUrl(key: string) {
   return getPublicUrl(key);
 }
 
+export async function getMediaReadUrl(key: string) {
+  requireR2Config();
+  const publicUrl = getPublicUrl(key);
+  if (publicUrl) {
+    return publicUrl;
+  }
+  return createSignedReadUrl(key);
+}
+
+export async function openMediaObject(key: string) {
+  requireR2Config();
+  const client = createClient();
+  const response = await client.send(
+    new GetObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+    }),
+  );
+
+  if (!response.Body) {
+    throw new Error("Média introuvable");
+  }
+
+  return {
+    body: response.Body,
+    contentType: response.ContentType ?? "application/octet-stream",
+    contentLength: response.ContentLength,
+  };
+}
+
 export async function createSignedReadUrl(key: string) {
   requireR2Config();
 

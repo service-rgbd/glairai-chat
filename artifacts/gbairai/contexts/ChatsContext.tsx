@@ -73,7 +73,7 @@ import {
   encodeImageMessagePayload,
   encodeStoryMediaPayload,
   encodeVideoMessagePayload,
-  getDisplayMediaUrl,
+  getUploadDisplayUrl,
   type StoryMediaPayload,
   uploadFileToSignedUrl,
   uploadStoryMediaWithThumbnail,
@@ -2703,7 +2703,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           await uploadFileToSignedUrl(target.uploadUrl, mediaUri, mimeType, draft.mediaAssetId);
           setPhase("finalizing");
           return {
-            url: getDisplayMediaUrl(target.key, target.publicUrl),
+            url: await getUploadDisplayUrl(authToken, target.key, target.publicUrl),
             key: target.key,
             mimeType,
             thumbnailUrl: undefined,

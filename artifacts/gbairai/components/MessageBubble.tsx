@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import type { GMessage, GUser } from "@/contexts/chats-types";
@@ -10,6 +10,7 @@ import { ViewOnceMediaIcon } from "@/components/ViewOnceMediaIcon";
 import { VoiceNoteBubble } from "@/components/VoiceNoteBubble";
 import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { useChatFontScale } from "@/hooks/useChatFontScale";
+import { useResolvableMediaUrl } from "@/hooks/useResolvableMediaUrl";
 import { useColors } from "@/hooks/useColors";
 import {
   getCallMessageLabel,
@@ -67,12 +68,12 @@ export function MessageBubble({
     !isDeletedMessage && message.type === "text" && !emoji3dPayload
       ? getCallMessagePayloadFromContent(message.content)
       : null;
-  const resolvedImageUrl = imagePayload ? getDisplayMediaUrl(imagePayload.key, imagePayload.url) : null;
+  const resolvedImageUrl = useResolvableMediaUrl(imagePayload?.key, imagePayload?.url);
   const resolvedVideoUrl = videoPayload ? getDisplayMediaUrl(videoPayload.key, videoPayload.url) : null;
-  const resolvedVideoThumbnailUrl =
-    videoPayload && (videoPayload.thumbnailKey || videoPayload.thumbnailUrl)
-      ? getDisplayMediaUrl(videoPayload.thumbnailKey ?? "", videoPayload.thumbnailUrl)
-      : null;
+  const resolvedVideoThumbnailUrl = useResolvableMediaUrl(
+    videoPayload?.thumbnailKey,
+    videoPayload?.thumbnailUrl,
+  );
   const isViewOnceOpened = isViewOnceOpenedContent(message.content);
   const viewOnceOpenedPayload = isViewOnceOpened ? parseViewOnceOpenedContent(message.content) : null;
   const isViewOnceImage = Boolean(imagePayload?.viewOnce);
@@ -92,6 +93,10 @@ export function MessageBubble({
   const cachedImageUrl = useCachedMediaUrl(resolvedImageUrl);
   const cachedVideoThumbnailUrl = useCachedMediaUrl(resolvedVideoThumbnailUrl);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setImageLoadFailed(false);
+  }, [resolvedImageUrl]);
 
   const time = new Date(message.timestamp).toLocaleTimeString("fr-FR", {
     hour: "2-digit",

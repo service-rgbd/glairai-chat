@@ -140,10 +140,7 @@ export function StoryMediaPickerModal({
     mimeType: string;
     assetId?: string | null;
   }) => {
-    const uri =
-      Platform.OS === "ios"
-        ? await prepareLocalMediaUriForUpload(input.uri, input.mimeType, input.assetId)
-        : input.uri;
+    const uri = await prepareLocalMediaUriForUpload(input.uri, input.mimeType, input.assetId);
     onSelectAsset({
       uri,
       mediaType: input.mediaType,

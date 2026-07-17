@@ -10,6 +10,19 @@ function buildMediaProxyUrl(key: string) {
   return `${getApiBaseUrl()}/api/media/public?key=${encodeURIComponent(key)}`;
 }
 
+function isEphemeralSignedUrl(url: string) {
+  return /X-Amz-|AWSAccessKeyId/i.test(url);
+}
+
+export function isStableDisplayUrl(url?: string | null) {
+  const trimmed = url?.trim();
+  if (!trimmed) return false;
+  if (/^(file:|blob:|data:)/i.test(trimmed)) return true;
+  if (trimmed.includes("/api/media/public")) return true;
+  if (isEphemeralSignedUrl(trimmed)) return false;
+  return /^https?:\/\//i.test(trimmed);
+}
+
 export interface AudioUploadTarget {
   key: string;
   uploadUrl: string;
@@ -90,12 +103,33 @@ export async function resolveMediaUrl(authToken: string, key: string) {
 }
 
 export function getDisplayMediaUrl(key: string, url?: string | null) {
-  if (url && url.trim()) {
-    return url;
+  if (url?.trim() && isStableDisplayUrl(url)) {
+    return url.trim();
   }
   if (/^(https?:|file:|blob:|data:)/i.test(key)) {
     return key;
   }
+  return buildMediaProxyUrl(key);
+}
+
+export async function getUploadDisplayUrl(
+  authToken: string,
+  key: string,
+  publicUrl?: string | null,
+) {
+  if (publicUrl?.trim() && isStableDisplayUrl(publicUrl)) {
+    return publicUrl.trim();
+  }
+
+  try {
+    const resolved = await resolveMediaUrl(authToken, key);
+    if (resolved?.trim() && isStableDisplayUrl(resolved)) {
+      return resolved.trim();
+    }
+  } catch {
+    // On retombe sur le proxy API.
+  }
+
   return buildMediaProxyUrl(key);
 }
 
@@ -304,11 +338,11 @@ export async function uploadChatVideoWithThumbnail(
   input.onPhase?.("finalizing");
 
   return {
-    url: getDisplayMediaUrl(videoTarget.key, videoTarget.publicUrl),
+    url: await getUploadDisplayUrl(authToken, videoTarget.key, videoTarget.publicUrl),
     key: videoTarget.key,
     mimeType: input.videoMimeType,
     thumbnailKey: thumbnailTarget.key,
-    thumbnailUrl: getDisplayMediaUrl(thumbnailTarget.key, thumbnailTarget.publicUrl),
+    thumbnailUrl: await getUploadDisplayUrl(authToken, thumbnailTarget.key, thumbnailTarget.publicUrl),
   };
 }
 
@@ -345,13 +379,13 @@ export async function uploadStoryMediaWithThumbnail(
       mimeType: "image/jpeg",
     });
     await uploadFileToSignedUrl(thumbnailTarget.uploadUrl, thumbnailUri, "image/jpeg");
-    thumbnailUrl = getDisplayMediaUrl(thumbnailTarget.key, thumbnailTarget.publicUrl);
+    thumbnailUrl = await getUploadDisplayUrl(authToken, thumbnailTarget.key, thumbnailTarget.publicUrl);
   }
 
   input.onPhase?.("finalizing");
 
   return {
-    url: getDisplayMediaUrl(target.key, target.publicUrl),
+    url: await getUploadDisplayUrl(authToken, target.key, target.publicUrl),
     key: target.key,
     mimeType: input.mimeType,
     thumbnailUrl,

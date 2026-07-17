@@ -27,12 +27,14 @@ import { MediaUploadOverlay } from "@/components/MediaUploadOverlay";
 import { UploadProgressBanner } from "@/components/UploadProgressBanner";
 import { EmojiPickerSheet } from "@/components/EmojiPickerSheet";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppFontScale } from "@/hooks/useChatFontScale";
 import { useColors } from "@/hooks/useColors";
 import {
   createAudioUploadTarget,
   createMediaUploadTarget,
   generateVideoThumbnailUri,
   getDisplayMediaUrl,
+  getUploadDisplayUrl,
   prepareLocalMediaUriForUpload,
   uploadAudioToSignedUrl,
   uploadChatVideoWithThumbnail,
@@ -178,6 +180,7 @@ export function ChatInput({
   onClearReply,
 }: ChatInputProps) {
   const colors = useColors();
+  const { inputFontSize } = useAppFontScale();
   const { authToken } = useAuth();
   const [text, setText] = useState("");
   const [isSendingText, setIsSendingText] = useState(false);
@@ -226,8 +229,9 @@ export function ChatInput({
       setPhase("uploading");
       await uploadFileToSignedUrl(target.uploadUrl, image.uri, image.mimeType);
       setPhase("finalizing");
+      const displayUrl = await getUploadDisplayUrl(authToken, target.key, target.publicUrl);
       onSendImage?.({
-        url: getDisplayMediaUrl(target.key, target.publicUrl),
+        url: displayUrl,
         key: target.key,
         mimeType: image.mimeType,
         width: image.width,
@@ -291,12 +295,27 @@ export function ChatInput({
 
     if (!isVideo) {
       setSendImageAsViewOnce(false);
-      setPendingImage({
-        uri: asset.uri,
-        mimeType,
-        width: asset.width,
-        height: asset.height,
-      });
+      setAudioError(null);
+      setIsPreparingPreview(true);
+      try {
+        const preparedUri = await prepareLocalMediaUriForUpload(
+          asset.uri,
+          mimeType,
+          asset.assetId,
+        );
+        setPendingImage({
+          uri: preparedUri,
+          mimeType,
+          width: asset.width,
+          height: asset.height,
+        });
+      } catch (error) {
+        setAudioError(
+          error instanceof Error ? error.message : "Impossible de préparer l'aperçu photo",
+        );
+      } finally {
+        setIsPreparingPreview(false);
+      }
       return;
     }
 
@@ -532,7 +551,7 @@ export function ChatInput({
             <View style={styles.idleBlock}>
               <View style={styles.textRow}>
                 <TextInput
-                  style={[styles.input, { color: colors.text }]}
+                  style={[styles.input, { color: colors.text, fontSize: inputFontSize }]}
                   placeholder="Message"
                   placeholderTextColor={colors.mutedForeground}
                   value={text}
