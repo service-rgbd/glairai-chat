@@ -8,7 +8,6 @@ import {
   createMediaUploadTarget,
   getMediaReadUrl,
   openMediaObject,
-  resolveMediaUrl,
 } from "../lib/media-service";
 
 const router: IRouter = Router();
@@ -106,18 +105,12 @@ router.get("/media/public", async (req, res) => {
       throw new Error("Clé média manquante");
     }
 
-    const publicUrl = resolveMediaUrl(key);
-    if (publicUrl) {
-      res.redirect(publicUrl);
-      return;
-    }
-
     const object = await openMediaObject(key);
     res.setHeader("Content-Type", object.contentType);
     if (object.contentLength) {
       res.setHeader("Content-Length", String(object.contentLength));
     }
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Cache-Control", "public, max-age=86400");
     toNodeStream(object.body).pipe(res);
   } catch (error) {
     res.status(400).json({

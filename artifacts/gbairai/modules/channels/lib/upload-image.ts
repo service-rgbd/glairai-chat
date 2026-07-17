@@ -1,7 +1,6 @@
 import {
   createMediaUploadTarget,
-  getDisplayMediaUrl,
-  resolveMediaUrl,
+  getUploadDisplayUrl,
   uploadFileToSignedUrl,
   type MediaCategory,
 } from "@/lib/media";
@@ -15,9 +14,5 @@ export async function uploadChannelImage(
 ) {
   const target = await createMediaUploadTarget(authToken, { category, mimeType });
   await uploadFileToSignedUrl(target.uploadUrl, localUri, mimeType, assetId);
-  return (
-    target.publicUrl ||
-    (await resolveMediaUrl(authToken, target.key)) ||
-    getDisplayMediaUrl(target.key, target.publicUrl)
-  );
+  return getUploadDisplayUrl(authToken, target.key, target.publicUrl);
 }

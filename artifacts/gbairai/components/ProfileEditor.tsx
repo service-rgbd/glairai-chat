@@ -15,8 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
   createMediaUploadTarget,
-  getDisplayMediaUrl,
-  resolveMediaUrl,
+  getUploadDisplayUrl,
   uploadFileToSignedUrl,
 } from "@/lib/media";
 
@@ -78,10 +77,7 @@ export function ProfileEditor({
         mimeType,
       });
       await uploadFileToSignedUrl(target.uploadUrl, localUri, mimeType);
-      const resolvedUrl =
-        target.publicUrl ||
-        (await resolveMediaUrl(authToken, target.key)) ||
-        getDisplayMediaUrl(target.key, target.publicUrl);
+      const resolvedUrl = await getUploadDisplayUrl(authToken, target.key, target.publicUrl);
       onChangeAvatar(resolvedUrl);
     }
   };

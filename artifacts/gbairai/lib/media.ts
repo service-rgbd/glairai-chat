@@ -10,8 +10,17 @@ function buildMediaProxyUrl(key: string) {
   return `${getApiBaseUrl()}/api/media/public?key=${encodeURIComponent(key)}`;
 }
 
-function isEphemeralSignedUrl(url: string) {
-  return /X-Amz-|AWSAccessKeyId/i.test(url);
+function extractMediaKeyFromPublicUrl(url?: string | null) {
+  if (!url?.trim()) return null;
+  try {
+    const pathname = new URL(url.trim()).pathname.replace(/^\/+/, "");
+    if (/^(chat-media|stories|avatars|voice-notes)\//.test(pathname)) {
+      return decodeURIComponent(pathname);
+    }
+  } catch {
+    // Ignore malformed URLs.
+  }
+  return null;
 }
 
 export function isStableDisplayUrl(url?: string | null) {
@@ -19,8 +28,26 @@ export function isStableDisplayUrl(url?: string | null) {
   if (!trimmed) return false;
   if (/^(file:|blob:|data:)/i.test(trimmed)) return true;
   if (trimmed.includes("/api/media/public")) return true;
-  if (isEphemeralSignedUrl(trimmed)) return false;
-  return /^https?:\/\//i.test(trimmed);
+  return false;
+}
+
+export function getDisplayMediaUrl(key: string, url?: string | null) {
+  if (url?.trim() && isStableDisplayUrl(url)) {
+    return url.trim();
+  }
+  const mediaKey = key?.trim() || extractMediaKeyFromPublicUrl(url);
+  if (mediaKey) {
+    return buildMediaProxyUrl(mediaKey);
+  }
+  return url?.trim() ?? "";
+}
+
+export async function getUploadDisplayUrl(
+  _authToken: string,
+  key: string,
+  _publicUrl?: string | null,
+) {
+  return buildMediaProxyUrl(key);
 }
 
 export interface AudioUploadTarget {
@@ -100,37 +127,6 @@ export async function resolveMediaUrl(authToken: string, key: string) {
 
   const parsed = (await response.json()) as { url: string };
   return parsed.url;
-}
-
-export function getDisplayMediaUrl(key: string, url?: string | null) {
-  if (url?.trim() && isStableDisplayUrl(url)) {
-    return url.trim();
-  }
-  if (/^(https?:|file:|blob:|data:)/i.test(key)) {
-    return key;
-  }
-  return buildMediaProxyUrl(key);
-}
-
-export async function getUploadDisplayUrl(
-  authToken: string,
-  key: string,
-  publicUrl?: string | null,
-) {
-  if (publicUrl?.trim() && isStableDisplayUrl(publicUrl)) {
-    return publicUrl.trim();
-  }
-
-  try {
-    const resolved = await resolveMediaUrl(authToken, key);
-    if (resolved?.trim() && isStableDisplayUrl(resolved)) {
-      return resolved.trim();
-    }
-  } catch {
-    // On retombe sur le proxy API.
-  }
-
-  return buildMediaProxyUrl(key);
 }
 
 function stripUriFragment(uri: string) {

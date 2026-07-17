@@ -37,8 +37,7 @@ import {
 } from "@/lib/group-settings";
 import {
   createMediaUploadTarget,
-  getDisplayMediaUrl,
-  resolveMediaUrl,
+  getUploadDisplayUrl,
   uploadFileToSignedUrl,
 } from "@/lib/media";
 
@@ -191,10 +190,7 @@ export default function GroupInfoScreen() {
           mimeType,
         });
         await uploadFileToSignedUrl(target.uploadUrl, asset.uri, mimeType);
-        avatarUrl =
-          target.publicUrl ||
-          (await resolveMediaUrl(authToken, target.key)) ||
-          getDisplayMediaUrl(target.key, target.publicUrl);
+        avatarUrl = await getUploadDisplayUrl(authToken, target.key, target.publicUrl);
       }
 
       await updateGroup(id, { avatarUrl });
