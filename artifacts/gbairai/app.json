@@ -80,7 +80,9 @@
       [
         "expo-notifications",
         {
-          "sounds": ["./assets/sounds/incoming.wav"]
+          "sounds": [
+            "./assets/sounds/incoming.wav"
+          ]
         }
       ],
       "expo-font",
@@ -92,7 +94,8 @@
           "savePhotosPermission": "Gbairai peut enregistrer les photos et vidéos reçues dans votre galerie.",
           "isAccessMediaLocationEnabled": false
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true

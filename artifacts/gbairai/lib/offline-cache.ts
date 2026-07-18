@@ -1,6 +1,4 @@
 import { clearLocalChatCache } from "@/lib/chat-local-sync";
-import { resetE2eBootstrapCache } from "@/lib/e2e/bootstrap";
-import { clearE2eStoreForUser } from "@/lib/e2e/store";
 import { clearMediaCache } from "@/lib/media-cache";
 import { QUERY_CACHE_KEY, queryClient } from "@/lib/query-client";
 import { createGbairaiQueryPersister } from "@/lib/query-persist";
@@ -49,6 +47,9 @@ export async function migrateLegacyUserCache(userId: string) {
 
 /** Supprime le cache hors-ligne d'un utilisateur (changement de compte ou action manuelle). */
 export async function purgeOfflineCacheForUser(userId: string) {
+  const { clearE2eStoreForUser } = await import("@/lib/e2e/store");
+  const { resetE2eBootstrapCache } = await import("@/lib/e2e/bootstrap");
+
   await createGbairaiQueryPersister(userId).removeClient();
 
   await Promise.all([

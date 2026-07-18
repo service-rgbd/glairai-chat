@@ -1,6 +1,9 @@
-import { getSecureItem, migrateLegacySecureItem, removeSecureItem, setSecureItem } from "@/lib/secure-storage";
+import { randomBytes } from "@noble/ciphers/utils.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 
-import * as Crypto from "expo-crypto";
+import { utf8ToBytes } from "@/lib/e2e/bytes";
+import { getSecureItem, migrateLegacySecureItem, removeSecureItem, setSecureItem } from "@/lib/secure-storage";
 
 const STORAGE_PREFIX = "gbairai:two-factor-pin:";
 
@@ -8,11 +11,8 @@ function storageKey(userId: string) {
   return `${STORAGE_PREFIX}${userId}`;
 }
 
-async function hashPin(pin: string, salt: string) {
-  const digest = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    `${salt}:${pin.trim()}`,
-  );
+function hashPin(pin: string, salt: string) {
+  const digest = bytesToHex(sha256(utf8ToBytes(`${salt}:${pin.trim()}`)));
   return `${salt}:${digest}`;
 }
 
@@ -35,9 +35,8 @@ export async function setTwoFactorPin(userId: string, pin: string) {
   if (!isValidTwoFactorPin(digits)) {
     throw new Error("Le code doit contenir entre 6 et 8 chiffres");
   }
-  const random = await Crypto.getRandomBytesAsync(16);
-  const salt = Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  const saved = await setSecureItem(storageKey(userId), await hashPin(digits, salt));
+  const salt = bytesToHex(randomBytes(16));
+  const saved = await setSecureItem(storageKey(userId), hashPin(digits, salt));
   if (!saved) {
     throw new Error("Impossible d'enregistrer le code");
   }
@@ -55,7 +54,7 @@ export async function verifyTwoFactorPin(userId: string, pin: string) {
   if (!salt) {
     return false;
   }
-  return stored === (await hashPin(normalizePin(pin), salt));
+  return stored === hashPin(normalizePin(pin), salt);
 }
 
 export async function clearTwoFactorPin(userId: string) {

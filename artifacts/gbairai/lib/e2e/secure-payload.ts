@@ -1,6 +1,5 @@
 import { gcm } from "@noble/ciphers/aes.js";
 import { randomBytes } from "@noble/ciphers/utils.js";
-import * as Crypto from "expo-crypto";
 
 import { base64ToBytes, bytesToBase64, utf8ToBytes } from "@/lib/e2e/bytes";
 import { getSecureItem, removeSecureItem, setSecureItem } from "@/lib/secure-storage";
@@ -19,7 +18,7 @@ async function getOrCreateMasterKey(userId: string) {
     return base64ToBytes(existing.trim());
   }
 
-  const bytes = await Crypto.getRandomBytesAsync(32);
+  const bytes = randomBytes(32);
   const encoded = bytesToBase64(bytes);
   await setSecureItem(storageKey, encoded);
   return bytes;

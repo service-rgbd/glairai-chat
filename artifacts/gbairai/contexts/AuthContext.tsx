@@ -28,8 +28,6 @@ import { signalPresenceOffline } from "@/lib/presence-session";
 import { logoutRemoteSession } from "@/lib/session-api";
 import { getSecureItem, migrateLegacySecureItem, removeSecureItem, setSecureItem } from "@/lib/secure-storage";
 import { setAuthTokenSnapshot } from "@/lib/auth-token";
-import { resetE2eBootstrapCache } from "@/lib/e2e/bootstrap";
-import { clearE2eStoreForUser } from "@/lib/e2e/store";
 import { clearArchivedAccessPassword } from "@/lib/archived-access";
 import { setMediaCachePolicy } from "@/lib/media-cache-policy";
 import { syncAndroidNotificationVibration } from "@/lib/notifications";
@@ -420,6 +418,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await logoutRemoteSession(token);
 
     if (userId) {
+      const { clearE2eStoreForUser } = await import("@/lib/e2e/store");
+      const { resetE2eBootstrapCache } = await import("@/lib/e2e/bootstrap");
       await clearE2eStoreForUser(userId);
       resetE2eBootstrapCache();
     }

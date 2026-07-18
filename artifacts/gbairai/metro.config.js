@@ -34,7 +34,6 @@ function resolvePackageDir(name) {
 const pinnedPackages = [
   "expo",
   "expo-constants",
-  "expo-crypto",
   "expo-router",
   "expo-secure-store",
   "react",

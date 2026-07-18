@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-import * as Crypto from "expo-crypto";
+import { randomBytes } from "@noble/ciphers/utils.js";
 
 import {
   clearE2eMasterKey,
@@ -26,7 +25,7 @@ function deviceKeysKey(userId: string) {
 }
 
 async function randomDeviceId() {
-  const bytes = await Crypto.getRandomBytesAsync(12);
+  const bytes = randomBytes(12);
   const random = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `dev_${Date.now().toString(36)}_${random}`;
 }
