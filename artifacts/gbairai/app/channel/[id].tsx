@@ -17,7 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { ChannelPostCard } from "@/modules/channels/components/ChannelPostCard";
 import { useChannels } from "@/modules/channels/context/ChannelsContext";
 import { uploadChannelImage } from "@/modules/channels/lib/upload-image";
@@ -30,7 +30,7 @@ export default function ChannelDetailsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
     getChannel,

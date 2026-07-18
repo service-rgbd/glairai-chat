@@ -4,9 +4,16 @@ export const E2E_FALLBACK_LABEL = "🔒 Message chiffré";
 export const E2E_DECRYPTING_LABEL = "Déchiffrement…";
 export const E2E_ONE_TIME_PREKEY_COUNT = 20;
 
-/** Désactivé par défaut — comportement actuel (messages en clair). */
 export function isE2eEnabled() {
   return process.env.EXPO_PUBLIC_E2E_ENABLED === "true";
+}
+
+/** En production, refuser tout envoi en clair si le contact n'a pas de clés E2E. */
+export function isE2eStrictMode() {
+  if (process.env.EXPO_PUBLIC_E2E_STRICT === "false") {
+    return false;
+  }
+  return !__DEV__;
 }
 
 export function isE2ePayload(content: string) {

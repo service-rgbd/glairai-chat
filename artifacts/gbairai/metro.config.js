@@ -34,7 +34,9 @@ function resolvePackageDir(name) {
 const pinnedPackages = [
   "expo",
   "expo-constants",
+  "expo-crypto",
   "expo-router",
+  "expo-secure-store",
   "react",
   "react-native",
   "@expo/metro-runtime",
@@ -65,14 +67,20 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     };
   }
 
-  if (!nativeCallUiEnabled && moduleName === "react-native-callkeep") {
+  if (
+    (!nativeCallUiEnabled || platform === "android") &&
+    moduleName === "react-native-callkeep"
+  ) {
     return {
       filePath: callKeepStubPath,
       type: "sourceFile",
     };
   }
 
-  if (!nativeCallUiEnabled && moduleName === "react-native-voip-push-notification") {
+  if (
+    (!nativeCallUiEnabled || platform === "android") &&
+    moduleName === "react-native-voip-push-notification"
+  ) {
     return {
       filePath: voipPushStubPath,
       type: "sourceFile",

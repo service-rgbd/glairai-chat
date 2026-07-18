@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import {
   ChannelCategoryPicker,
   ChannelFormField,
@@ -35,7 +35,7 @@ export default function CreateChannelScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
   const { createNewChannel, refreshDiscovery } = useChannels();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;

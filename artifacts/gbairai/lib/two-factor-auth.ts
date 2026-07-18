@@ -1,6 +1,6 @@
-import * as Crypto from "expo-crypto";
+import { getSecureItem, migrateLegacySecureItem, removeSecureItem, setSecureItem } from "@/lib/secure-storage";
 
-import { safeGetItem, safeRemoveItem, safeSetItem } from "@/lib/safe-storage";
+import * as Crypto from "expo-crypto";
 
 const STORAGE_PREFIX = "gbairai:two-factor-pin:";
 
@@ -26,7 +26,7 @@ export function isValidTwoFactorPin(pin: string) {
 }
 
 export async function isTwoFactorEnabled(userId: string) {
-  const stored = await safeGetItem(storageKey(userId));
+  const stored = await getSecureItem(storageKey(userId));
   return Boolean(stored);
 }
 
@@ -37,14 +37,17 @@ export async function setTwoFactorPin(userId: string, pin: string) {
   }
   const random = await Crypto.getRandomBytesAsync(16);
   const salt = Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  const saved = await safeSetItem(storageKey(userId), await hashPin(digits, salt));
+  const saved = await setSecureItem(storageKey(userId), await hashPin(digits, salt));
   if (!saved) {
     throw new Error("Impossible d'enregistrer le code");
   }
 }
 
 export async function verifyTwoFactorPin(userId: string, pin: string) {
-  const stored = await safeGetItem(storageKey(userId));
+  let stored = await getSecureItem(storageKey(userId));
+  if (!stored) {
+    stored = await migrateLegacySecureItem(storageKey(userId));
+  }
   if (!stored) {
     return true;
   }
@@ -56,5 +59,5 @@ export async function verifyTwoFactorPin(userId: string, pin: string) {
 }
 
 export async function clearTwoFactorPin(userId: string) {
-  await safeRemoveItem(storageKey(userId));
+  await removeSecureItem(storageKey(userId));
 }

@@ -28,6 +28,8 @@ import { signalPresenceOffline } from "@/lib/presence-session";
 import { logoutRemoteSession } from "@/lib/session-api";
 import { getSecureItem, migrateLegacySecureItem, removeSecureItem, setSecureItem } from "@/lib/secure-storage";
 import { setAuthTokenSnapshot } from "@/lib/auth-token";
+import { resetE2eBootstrapCache } from "@/lib/e2e/bootstrap";
+import { clearE2eStoreForUser } from "@/lib/e2e/store";
 import { clearArchivedAccessPassword } from "@/lib/archived-access";
 import { setMediaCachePolicy } from "@/lib/media-cache-policy";
 import { syncAndroidNotificationVibration } from "@/lib/notifications";
@@ -58,7 +60,6 @@ export interface AuthUser {
 
 interface AuthContextType {
   currentUser: AuthUser | null;
-  authToken: string | null;
   isAuthenticated: boolean;
   needsProfileSetup: boolean;
   isLoading: boolean;
@@ -413,9 +414,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     const { resetContactsSyncState, resetContactsPermissionState } = await import("@/lib/contacts-sync");
     const token = authToken;
+    const userId = currentUser?.id;
 
     await signalPresenceOffline({ authToken: token });
     await logoutRemoteSession(token);
+
+    if (userId) {
+      await clearE2eStoreForUser(userId);
+      resetE2eBootstrapCache();
+    }
 
     await Promise.all([removeSecureItem(TOKEN_STORAGE_KEY), safeRemoveItem(USER_STORAGE_KEY)]);
     queryClient.removeQueries({ queryKey: ["conversations"] });
@@ -444,7 +451,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         currentUser,
-        authToken,
         isAuthenticated: Boolean(authToken && currentUser && !isLoading),
         needsProfileSetup: !!currentUser && !currentUser.isOnboarded,
         isLoading,

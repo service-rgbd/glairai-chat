@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useColors } from "@/hooks/useColors";
 import {
   createMediaUploadTarget,
@@ -43,7 +44,7 @@ export function ProfileEditor({
   onSubmit,
 }: ProfileEditorProps) {
   const colors = useColors();
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
 
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();

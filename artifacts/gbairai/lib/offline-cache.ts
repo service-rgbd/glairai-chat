@@ -1,4 +1,6 @@
 import { clearLocalChatCache } from "@/lib/chat-local-sync";
+import { resetE2eBootstrapCache } from "@/lib/e2e/bootstrap";
+import { clearE2eStoreForUser } from "@/lib/e2e/store";
 import { clearMediaCache } from "@/lib/media-cache";
 import { QUERY_CACHE_KEY, queryClient } from "@/lib/query-client";
 import { createGbairaiQueryPersister } from "@/lib/query-persist";
@@ -58,7 +60,9 @@ export async function purgeOfflineCacheForUser(userId: string) {
     safeRemoveItem(UserCacheKeys.loadedConversations(userId)),
     clearLocalChatCache(),
     clearMediaCache(),
+    clearE2eStoreForUser(userId),
   ]);
+  resetE2eBootstrapCache();
 }
 
 /** Au login : purge l'ancien compte si différent, conserve le cache du même utilisateur. */

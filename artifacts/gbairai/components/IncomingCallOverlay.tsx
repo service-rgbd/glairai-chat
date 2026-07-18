@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/Avatar";
 import { CallSoundController } from "@/components/CallSoundController";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import { signalConversationCall } from "@/lib/calls";
@@ -46,7 +46,7 @@ function initialsFromName(name: string) {
 export function IncomingCallOverlay() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
   const { users, recordCall } = useChats();
   const [incoming, setIncoming] = useState<IncomingCallPayload | null>(() => getIncomingCall());
   const [uiMode, setUiMode] = useState<IncomingCallUiMode>(() => getIncomingCallUiMode());

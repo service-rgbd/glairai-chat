@@ -1,5 +1,6 @@
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
+import { Platform } from "react-native";
 
 import {
   endNativeCall,
@@ -8,7 +9,7 @@ import {
 } from "@/lib/call-system-ui";
 import { clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
 import { useChats } from "@/contexts/chats-context-ref";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { signalConversationCall } from "@/lib/calls";
 import { logConversationCall } from "@/lib/call-log";
 import { afterAuthNativeDelay } from "@/lib/post-auth-native-delay";
@@ -18,7 +19,7 @@ import { afterAuthNativeDelay } from "@/lib/post-auth-native-delay";
  * Avec VoIP actif : handlers seulement au login, CallKit s'initialise à l'appel entrant.
  */
 export function NativeCallController() {
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
   const { recordCall } = useChats();
   const authTokenRef = useRef(authToken);
   const recordCallRef = useRef(recordCall);
@@ -108,7 +109,7 @@ export function NativeCallController() {
     registerNativeCallHandlers(handlers);
 
     const cancelDelay = afterAuthNativeDelay(() => {
-      if (cancelled) return;
+      if (cancelled || Platform.OS !== "ios") return;
       void setupNativeCallUi(handlers).then((ok) => {
         if (ok) {
           void import("@/lib/voip-push").then(({ requestVoipPushTokenAfterCallKit }) => {

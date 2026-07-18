@@ -9,6 +9,7 @@ import {
   SettingsSecondaryButton,
 } from "@/components/settings/SettingsUi";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useColors } from "@/hooks/useColors";
 import {
   isLocalProfilePhotoUri,
@@ -19,7 +20,8 @@ import {
 
 export default function SettingsPhotoScreen() {
   const colors = useColors();
-  const { currentUser, authToken, updateProfile } = useAuth();
+  const { currentUser, updateProfile } = useAuth();
+  const authToken = useAuthToken();
   const [avatar, setAvatar] = useState<string | null>(currentUser?.avatar ?? null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);

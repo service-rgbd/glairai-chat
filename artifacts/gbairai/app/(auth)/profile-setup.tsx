@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useColors } from "@/hooks/useColors";
 import {
   isLocalProfilePhotoUri,
@@ -21,7 +22,8 @@ import {
 export default function ProfileSetupScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { currentUser, setupProfile, logout, authToken } = useAuth();
+  const { currentUser, setupProfile, logout } = useAuth();
+  const authToken = useAuthToken();
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);

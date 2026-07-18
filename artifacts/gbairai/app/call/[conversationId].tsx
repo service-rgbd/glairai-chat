@@ -16,6 +16,7 @@ import { Avatar } from "@/components/Avatar";
 import { CallSoundController } from "@/components/CallSoundController";
 import { LiveKitCallRoom } from "@/components/LiveKitCallRoom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
 import type { CallSoundPhase } from "@/lib/call-audio";
@@ -63,7 +64,8 @@ export default function CallScreen() {
   }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { currentUser, authToken } = useAuth();
+  const { currentUser } = useAuth();
+  const authToken = useAuthToken();
   const { chats, users, getOtherUser, startOutgoingCall, updateCall } = useChats();
 
   const [isLoading, setIsLoading] = useState(true);

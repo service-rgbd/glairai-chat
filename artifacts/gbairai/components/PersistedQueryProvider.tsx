@@ -5,6 +5,7 @@ import { ActivityIndicator, View } from "react-native";
 
 import { QueryHydrationProvider } from "@/contexts/QueryHydrationContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useColors } from "@/hooks/useColors";
 import { hasWarmConversationCache } from "@/lib/offline-cache";
 import { queryClient } from "@/lib/query-client";
@@ -37,7 +38,8 @@ function RestoreSplash() {
 }
 
 export function PersistedQueryProvider({ children }: { children: React.ReactNode }) {
-  const { authToken, currentUser } = useAuth();
+  const { currentUser } = useAuth();
+  const authToken = useAuthToken();
   const userId = currentUser?.id ?? null;
   const [hydrated, setHydrated] = useState(false);
 

@@ -1,5 +1,5 @@
 import { fetchPreKeyBundle } from "@/lib/e2e/api";
-import { isE2eEnabled, isE2ePayload, E2E_FALLBACK_LABEL } from "@/lib/e2e/config";
+import { isE2eEnabled, isE2eStrictMode, isE2ePayload, E2E_FALLBACK_LABEL } from "@/lib/e2e/config";
 import { decryptFromPeer, encryptForPeer } from "@/lib/e2e/crypto";
 import { ensureE2eDeviceRegistered } from "@/lib/e2e/bootstrap";
 import { loadSession, saveSession } from "@/lib/e2e/store";
@@ -40,12 +40,11 @@ export async function encryptDirectTextMessage(
     return result.content;
   } catch (error) {
     if (isPeerKeysMissingError(error)) {
-      const allowPlaintextFallback = __DEV__ || process.env.EXPO_PUBLIC_E2E_STRICT === "false";
-      if (!allowPlaintextFallback) {
+      if (isE2eStrictMode()) {
         throw new Error("Impossible d'envoyer un message chiffré à ce contact");
       }
       if (__DEV__) {
-        console.warn("[Gbairai] E2E: contact sans clés — envoi en clair");
+        console.warn("[Gbairai] E2E: contact sans clés — envoi en clair (dev uniquement)");
       }
       return plaintext;
     }

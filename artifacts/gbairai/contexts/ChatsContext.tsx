@@ -40,6 +40,7 @@ import type { Socket } from "socket.io-client";
 
 import { getOrCreateChatsContext } from "@/contexts/chats-context-ref";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useQueryHydrated } from "@/contexts/QueryHydrationContext";
 import { getApiBaseUrl } from "@/lib/api-config";
 import {
@@ -116,6 +117,7 @@ import {
   shouldEncryptDirectText,
   tryDecryptDirectTextMessage,
 } from "@/lib/e2e";
+import { purgeLegacyE2ePlaintextCache } from "@/lib/e2e/store";
 
 import type {
   ChatsContextType,
@@ -216,8 +218,7 @@ const INITIAL_STORIES: GStory[] = [
 const ONLINE_PRESENCE_INTERVAL = 20_000;
 const CONVERSATIONS_STALE_MS = 1000 * 60 * 2;
 const MESSAGES_STALE_MS = 1000 * 60 * 10;
-const E2E_PLAINTEXT_CACHE_PREFIX = "@gbairai/e2e/plaintext:";
-const E2E_PLAINTEXT_CACHE_LIMIT = 500;
+const E2E_DECRYPT_CACHE_LIMIT = 500;
 const MUTED_CONVERSATIONS_PREFIX = "@gbairai/conversations/muted:";
 const PINNED_CONVERSATIONS_PREFIX = "@gbairai/conversations/pinned:";
 
@@ -229,8 +230,10 @@ function pinnedConversationsKey(userId: string) {
   return `${PINNED_CONVERSATIONS_PREFIX}${userId}`;
 }
 
-function e2ePlaintextCacheKey(userId: string) {
-  return `${E2E_PLAINTEXT_CACHE_PREFIX}${userId}`;
+function trimE2eDecryptCache(cache: Record<string, string>) {
+  const entries = Object.entries(cache);
+  if (entries.length <= E2E_DECRYPT_CACHE_LIMIT) return cache;
+  return Object.fromEntries(entries.slice(entries.length - E2E_DECRYPT_CACHE_LIMIT));
 }
 
 function isHttpNotFound(error: unknown) {
@@ -240,12 +243,6 @@ function isHttpNotFound(error: unknown) {
     "status" in error &&
     (error as { status?: number }).status === 404
   );
-}
-
-function trimE2ePlaintextCache(cache: Record<string, string>) {
-  const entries = Object.entries(cache);
-  if (entries.length <= E2E_PLAINTEXT_CACHE_LIMIT) return cache;
-  return Object.fromEntries(entries.slice(entries.length - E2E_PLAINTEXT_CACHE_LIMIT));
 }
 
 const ChatsReactContext = getOrCreateChatsContext();
@@ -694,7 +691,8 @@ function sortGMessages(messages: GMessage[]) {
 
 export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
-  const { authToken, currentUser, isAuthenticated, registerPushDevice } = useAuth();
+  const { currentUser, isAuthenticated, registerPushDevice } = useAuth();
+  const authToken = useAuthToken();
   const queryHydrated = useQueryHydrated();
   const prevAuthTokenRef = useRef<string | null>(null);
   const composeContactsRef = useRef<ComposeContactOption[]>([]);
@@ -1061,7 +1059,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           nextCursor: current?.nextCursor ?? null,
         }));
         if (isE2ePayload(wireContent)) {
-          persistE2ePlaintextCache({ [sentMessage.id]: queued.content });
+          updateE2eDecryptCache({ [sentMessage.id]: queued.content });
         }
         setOutbox((prev) => prev.filter((item) => item.localId !== queued.localId));
       }
@@ -1191,7 +1189,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             );
             if (matchIndex < 0) return prev;
             const matched = prev[matchIndex]!;
-            persistE2ePlaintextCache({ [event.message!.id]: matched.content });
+            updateE2eDecryptCache({ [event.message!.id]: matched.content });
             return prev.filter((_, index) => index !== matchIndex);
           });
         } else {
@@ -1840,58 +1838,22 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   }, [e2eDecryptCache]);
 
   useEffect(() => {
-    if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
-    let cancelled = false;
-    void (async () => {
-      const raw = await safeGetItem(e2ePlaintextCacheKey(currentUser.id));
-      if (!raw || cancelled) return;
-      try {
-        const cached = JSON.parse(raw) as Record<string, string>;
-        e2eDecryptCacheRef.current = trimE2ePlaintextCache({
-          ...e2eDecryptCacheRef.current,
-          ...cached,
-        });
-        setE2eDecryptCache(e2eDecryptCacheRef.current);
-      } catch {
-        // Cache local best-effort : un contenu invalide sera simplement ignoré.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser?.id, isAuthenticated, localStorageReady]);
+    if (!isAuthenticated || !currentUser?.id) return;
+    void purgeLegacyE2ePlaintextCache(currentUser.id);
+  }, [currentUser?.id, isAuthenticated]);
+
+  const updateE2eDecryptCache = useCallback((updates: Record<string, string>) => {
+    if (!Object.keys(updates).length) return;
+    e2eDecryptCacheRef.current = trimE2eDecryptCache({
+      ...e2eDecryptCacheRef.current,
+      ...updates,
+    });
+    setE2eDecryptCache(e2eDecryptCacheRef.current);
+  }, []);
 
   useEffect(() => {
     e2eDecryptFailedRef.current = e2eDecryptFailed;
   }, [e2eDecryptFailed]);
-
-  const persistE2ePlaintextCache = useCallback(
-    (updates: Record<string, string>) => {
-      if (!currentUser?.id || !Object.keys(updates).length) return;
-      const userId = currentUser.id;
-      e2eDecryptCacheRef.current = trimE2ePlaintextCache({
-        ...e2eDecryptCacheRef.current,
-        ...updates,
-      });
-      setE2eDecryptCache(e2eDecryptCacheRef.current);
-      void (async () => {
-        let stored: Record<string, string> = {};
-        const raw = await safeGetItem(e2ePlaintextCacheKey(userId));
-        if (raw) {
-          try {
-            stored = JSON.parse(raw) as Record<string, string>;
-          } catch {
-            stored = {};
-          }
-        }
-        await safeSetItem(
-          e2ePlaintextCacheKey(userId),
-          JSON.stringify(trimE2ePlaintextCache({ ...stored, ...updates })),
-        );
-      })();
-    },
-    [currentUser?.id],
-  );
 
   useEffect(() => {
     if (!isE2eEnabled() || !authToken || !currentUser?.id) return;
@@ -2240,7 +2202,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             setE2eDecryptFailed((prev) => (prev[item.id] ? prev : { ...prev, [item.id]: true }));
             continue;
           }
-          persistE2ePlaintextCache({ [item.id]: result });
+          updateE2eDecryptCache({ [item.id]: result });
         } finally {
           e2eDecryptInflightRef.current.delete(item.id);
         }
@@ -2310,7 +2272,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           nextCursor: current?.nextCursor ?? null,
         }));
         if (isE2ePayload(wireContent)) {
-          persistE2ePlaintextCache({ [sentMessage.id]: serialized });
+          updateE2eDecryptCache({ [sentMessage.id]: serialized });
         }
         setOutbox((prev) => prev.filter((item) => item.localId !== payload.localId));
       } catch {
@@ -2638,7 +2600,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         nextCursor: current?.nextCursor ?? null,
       }));
       if (isE2ePayload(wireContent)) {
-        persistE2ePlaintextCache({ [updatedMessage.id]: editedContent });
+        updateE2eDecryptCache({ [updatedMessage.id]: editedContent });
       }
       queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
         conversations: updateConversationSummaryWithEditedMessage(

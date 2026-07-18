@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "@/components/Avatar";
 import { SearchBar } from "@/components/SearchBar";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import type { ComposeContactOption } from "@/contexts/chats-types";
 import { useChats } from "@/contexts/chats-context-ref";
 import { useColors } from "@/hooks/useColors";
@@ -45,7 +46,8 @@ export default function GroupInfoScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { currentUser, authToken } = useAuth();
+  const { currentUser } = useAuth();
+  const authToken = useAuthToken();
   const {
     chats,
     users,

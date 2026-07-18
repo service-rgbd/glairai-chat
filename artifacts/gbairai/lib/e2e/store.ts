@@ -2,12 +2,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import * as Crypto from "expo-crypto";
 
-import { safeGetItem, safeRemoveItem, safeSetItem } from "@/lib/safe-storage";
+import {
+  clearE2eMasterKey,
+  clearEncryptedPayload,
+  loadEncryptedPayload,
+  saveEncryptedPayload,
+} from "@/lib/e2e/secure-payload";
 import type { StoredDeviceKeys, StoredSession } from "@/lib/e2e/types";
+import { getSecureItem, migrateLegacySecureItem, setSecureItem } from "@/lib/secure-storage";
+import { safeGetItem, safeRemoveItem } from "@/lib/safe-storage";
 
 const DEVICE_ID_KEY = "@gbairai/e2e/device-id";
 const DEVICE_KEYS_PREFIX = "@gbairai/e2e/device-keys:";
 const SESSION_PREFIX = "@gbairai/e2e/session:";
+const LEGACY_PLAINTEXT_CACHE_PREFIX = "@gbairai/e2e/plaintext:";
 
 function sessionKey(userId: string, peerUserId: string) {
   return `${SESSION_PREFIX}${userId}:${peerUserId}`;
@@ -24,44 +32,35 @@ async function randomDeviceId() {
 }
 
 export async function getOrCreateDeviceId() {
-  const existing = await safeGetItem(DEVICE_ID_KEY);
+  const existing = await getSecureItem(DEVICE_ID_KEY);
   if (existing?.trim()) return existing.trim();
 
+  const legacy = await migrateLegacySecureItem(DEVICE_ID_KEY);
+  if (legacy?.trim()) return legacy.trim();
+
   const created = await randomDeviceId();
-  await safeSetItem(DEVICE_ID_KEY, created);
+  await setSecureItem(DEVICE_ID_KEY, created);
   return created;
 }
 
 export async function loadDeviceKeys(userId: string) {
-  const raw = await safeGetItem(deviceKeysKey(userId));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredDeviceKeys;
-  } catch {
-    return null;
-  }
+  return loadEncryptedPayload<StoredDeviceKeys>(userId, deviceKeysKey(userId));
 }
 
 export async function saveDeviceKeys(userId: string, keys: StoredDeviceKeys) {
-  await safeSetItem(deviceKeysKey(userId), JSON.stringify(keys));
+  await saveEncryptedPayload(userId, deviceKeysKey(userId), keys);
 }
 
 export async function loadSession(userId: string, peerUserId: string) {
-  const raw = await safeGetItem(sessionKey(userId, peerUserId));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredSession;
-  } catch {
-    return null;
-  }
+  return loadEncryptedPayload<StoredSession>(userId, sessionKey(userId, peerUserId));
 }
 
 export async function saveSession(userId: string, session: StoredSession) {
-  await safeSetItem(sessionKey(userId, session.peerUserId), JSON.stringify(session));
+  await saveEncryptedPayload(userId, sessionKey(userId, session.peerUserId), session);
 }
 
 export async function deleteSession(userId: string, peerUserId: string) {
-  await safeRemoveItem(sessionKey(userId, peerUserId));
+  await clearEncryptedPayload(sessionKey(userId, peerUserId));
 }
 
 export async function clearAllSessionsForUser(userId: string) {
@@ -78,6 +77,12 @@ export async function clearAllSessionsForUser(userId: string) {
 }
 
 export async function clearE2eStoreForUser(userId: string) {
-  await safeSetItem(deviceKeysKey(userId), "");
+  await clearEncryptedPayload(deviceKeysKey(userId));
   await clearAllSessionsForUser(userId);
+  await clearE2eMasterKey(userId);
+  await purgeLegacyE2ePlaintextCache(userId);
+}
+
+export async function purgeLegacyE2ePlaintextCache(userId: string) {
+  await safeRemoveItem(`${LEGACY_PLAINTEXT_CACHE_PREFIX}${userId}`);
 }

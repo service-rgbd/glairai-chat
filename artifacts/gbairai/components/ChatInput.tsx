@@ -26,7 +26,7 @@ import {
 import { MediaUploadOverlay } from "@/components/MediaUploadOverlay";
 import { UploadProgressBanner } from "@/components/UploadProgressBanner";
 import { EmojiPickerSheet } from "@/components/EmojiPickerSheet";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { useAppFontScale } from "@/hooks/useChatFontScale";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -181,7 +181,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const colors = useColors();
   const { inputFontSize } = useAppFontScale();
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
   const [text, setText] = useState("");
   const [isSendingText, setIsSendingText] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);

@@ -2,10 +2,10 @@ import React from "react";
 
 import { NetworkIssueBanner } from "@/components/NetworkIssueBanner";
 import { useNetworkStatus } from "@/contexts/NetworkStatusContext";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 
 export function NetworkStatusBridge() {
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
   const { bannerKind, checking, dismissBanner, retryConnection } = useNetworkStatus();
 
   if (!authToken) {

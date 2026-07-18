@@ -16,6 +16,7 @@ import {
   syncNetworkGateStatus,
 } from "@/lib/network-gate";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 
 export type NetworkBannerKind = "hidden" | "offline" | "unstable" | "restored";
 
@@ -33,7 +34,7 @@ type NetworkStatusContextValue = {
 const NetworkStatusContext = createContext<NetworkStatusContextValue | null>(null);
 
 export function NetworkStatusProvider({ children }: { children: React.ReactNode }) {
-  const { authToken } = useAuth();
+  const authToken = useAuthToken();
   const enabled = Boolean(authToken);
   const status = useAppNetworkStatus(enabled);
   const prevStatusRef = useRef<AppNetworkStatus>(status);

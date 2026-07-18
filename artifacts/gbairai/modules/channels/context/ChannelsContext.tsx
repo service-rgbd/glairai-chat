@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { useAuthToken } from "@/hooks/useAuthToken";
 import { getApiBaseUrl } from "@/lib/api-config";
 import { isRealtimeSocketEnabled } from "@/lib/runtime-env";
 
@@ -52,7 +53,8 @@ type ChannelsContextValue = {
 const ChannelsContext = createContext<ChannelsContextValue | null>(null);
 
 export function ChannelsProvider({ children }: { children: React.ReactNode }) {
-  const { authToken, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
+  const authToken = useAuthToken();
   const queryClient = useQueryClient();
   const socketRef = useRef<import("socket.io-client").Socket | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
