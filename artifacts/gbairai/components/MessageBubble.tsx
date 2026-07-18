@@ -19,6 +19,7 @@ import {
 } from "@/lib/call-messages";
 import { DELETED_MESSAGE_LABEL } from "@/lib/message-meta";
 import { getEmoji3dDisplayUrl, getEmoji3dPayloadFromContent } from "@/lib/emoji-messages";
+import { getAuthenticatedImageSource } from "@/lib/media-image-source";
 import {
   getDisplayMediaUrl,
   parseAudioMessagePayload,
@@ -92,6 +93,8 @@ export function MessageBubble({
   const viewOnceScreenshotted = viewOnceOpenedPayload?.screenshotted === true;
   const cachedImageUrl = useCachedMediaUrl(resolvedImageUrl);
   const cachedVideoThumbnailUrl = useCachedMediaUrl(resolvedVideoThumbnailUrl);
+  const imageSource = getAuthenticatedImageSource(cachedImageUrl ?? resolvedImageUrl);
+  const videoThumbnailSource = getAuthenticatedImageSource(cachedVideoThumbnailUrl ?? resolvedVideoThumbnailUrl);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
   useEffect(() => {
@@ -347,9 +350,9 @@ export function MessageBubble({
             activeOpacity={0.86}
             disabled={!resolvedImageUrl}
           >
-            {resolvedImageUrl && !imageLoadFailed ? (
+            {imageSource && !imageLoadFailed ? (
               <Image
-                source={{ uri: cachedImageUrl ?? resolvedImageUrl }}
+                source={imageSource}
                 style={styles.imageMedia}
                 contentFit="cover"
                 cachePolicy="memory-disk"
@@ -389,9 +392,9 @@ export function MessageBubble({
             activeOpacity={0.86}
           >
             <View style={styles.videoThumbWrap}>
-              {cachedVideoThumbnailUrl ? (
+              {videoThumbnailSource ? (
                 <Image
-                  source={{ uri: cachedVideoThumbnailUrl }}
+                  source={videoThumbnailSource}
                   style={styles.videoMedia}
                   contentFit="cover"
                   cachePolicy="memory-disk"

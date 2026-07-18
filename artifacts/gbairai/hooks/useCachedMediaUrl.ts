@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 
 import { getMediaAuthHeaders, isProtectedMediaUrl } from "@/lib/auth-token";
 import { peekCachedMediaUri, resolveCachedMediaUri } from "@/lib/media-cache";
-import { shouldResolveMediaToDisk } from "@/lib/media-cache-policy";
 
 export function useCachedMediaUrl(remoteUrl: string | null | undefined) {
   const [uri, setUri] = useState<string | null>(() => peekCachedMediaUri(remoteUrl));
@@ -13,36 +12,30 @@ export function useCachedMediaUrl(remoteUrl: string | null | undefined) {
       return;
     }
 
-    const cached = peekCachedMediaUri(remoteUrl);
+    const trimmed = remoteUrl.trim();
+    const cached = peekCachedMediaUri(trimmed);
     if (cached) {
       setUri(cached);
       return;
     }
 
-    if (!isProtectedMediaUrl(remoteUrl)) {
-      setUri(remoteUrl);
-    } else {
-      setUri(null);
-    }
-
-    if (!shouldResolveMediaToDisk()) {
-      if (isProtectedMediaUrl(remoteUrl)) {
-        setUri(remoteUrl);
-      }
+    if (!isProtectedMediaUrl(trimmed)) {
+      setUri(trimmed);
       return;
     }
 
+    setUri(null);
     let cancelled = false;
 
-    void resolveCachedMediaUri(remoteUrl)
+    void resolveCachedMediaUri(trimmed)
       .then((resolved) => {
         if (!cancelled && resolved) {
           setUri(resolved);
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          setUri(remoteUrl);
+        if (!cancelled && getMediaAuthHeaders().Authorization) {
+          setUri(trimmed);
         }
       });
 

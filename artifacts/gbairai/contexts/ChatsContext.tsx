@@ -109,6 +109,7 @@ import {
 import { runWithUploadStatus } from "@/lib/upload-status";
 import {
   E2E_FALLBACK_LABEL,
+  E2E_DECRYPTING_LABEL,
   ensureE2eDeviceRegistered,
   encryptDirectTextMessage,
   isE2eEnabled,
@@ -445,26 +446,32 @@ function toReadableMessageContent(
   message: Pick<ConversationMessage, "content">,
   decryptedContent?: string,
   decryptFailed?: boolean,
+  isOwnMessage = false,
 ) {
   if (decryptedContent) {
     return getMessageDisplayContent(decryptedContent).displayContent;
   }
   if (isE2ePayload(message.content)) {
-    if (decryptFailed) {
+    if (decryptFailed && !isOwnMessage) {
       return E2E_FALLBACK_LABEL;
     }
-    // Déchiffrement en cours : ne rien afficher (le message est masqué
-    // de la liste tant que le texte en clair n'est pas disponible).
+    if (isOwnMessage) {
+      return E2E_DECRYPTING_LABEL;
+    }
     return "";
   }
   return getMessageDisplayContent(message.content).displayContent;
 }
 
 function isPendingE2eDecrypt(
-  message: Pick<ConversationMessage, "content">,
+  message: Pick<ConversationMessage, "content" | "senderId">,
+  currentUserId: string,
   decryptedContent?: string,
   decryptFailed?: boolean,
 ) {
+  if (message.senderId === currentUserId) {
+    return false;
+  }
   return isE2ePayload(message.content) && !decryptedContent && !decryptFailed;
 }
 
@@ -641,7 +648,8 @@ function upsertReceipt(
 }
 
 function toGMessageContent(
-  message: Pick<ConversationMessage, "content" | "type">,
+  message: Pick<ConversationMessage, "content" | "type" | "senderId">,
+  currentUserId: string,
   decryptedContent?: string,
   decryptFailed?: boolean,
 ) {
@@ -649,13 +657,14 @@ function toGMessageContent(
     return message.content;
   }
   const source = decryptedContent ?? message.content;
+  const isOwnMessage = message.senderId === currentUserId;
   if (!isE2ePayload(message.content) || decryptedContent) {
     const extracted = extractReplyFromContent(source);
     if (extracted.replyTo) {
       return getMessageDisplayContent(extracted.body).displayContent;
     }
   }
-  return toReadableMessageContent(message, decryptedContent, decryptFailed);
+  return toReadableMessageContent(message, decryptedContent, decryptFailed, isOwnMessage);
 }
 
 function toGMessage(
@@ -674,7 +683,7 @@ function toGMessage(
     id: message.id,
     chatId: message.conversationId,
     senderId: message.senderId,
-    content: toGMessageContent(message, decryptedContent, decryptFailed),
+    content: toGMessageContent(message, currentUserId, decryptedContent, decryptFailed),
     type: meta.isDeleted ? "text" : message.type,
     status: toMessageStatus(message, currentUserId),
     timestamp: message.createdAt,
@@ -1849,6 +1858,17 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       ...updates,
     });
     setE2eDecryptCache(e2eDecryptCacheRef.current);
+    setE2eDecryptFailed((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const messageId of Object.keys(updates)) {
+        if (!next[messageId]) continue;
+        delete next[messageId];
+        delete e2eDecryptFailedRef.current[messageId];
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
   }, []);
 
   useEffect(() => {
@@ -2048,7 +2068,12 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       record[chatId] = page.messages
         .filter(
           (message) =>
-            !isPendingE2eDecrypt(message, e2eDecryptCache[message.id], e2eDecryptFailed[message.id]),
+            !isPendingE2eDecrypt(
+              message,
+              currentUser.id,
+              e2eDecryptCache[message.id],
+              e2eDecryptFailed[message.id],
+            ),
         )
         .map((message) =>
           toGMessage(
@@ -2111,7 +2136,6 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         createdAt: string;
       }
     >();
-    const selfEncryptedIds: string[] = [];
 
     const collect = (message: {
       id: string;
@@ -2121,12 +2145,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       createdAt: string;
     }) => {
       if (!isE2ePayload(message.content)) return;
+      if (message.senderId === currentUser.id) return;
       if (e2eDecryptCacheRef.current[message.id]) return;
       if (e2eDecryptFailedRef.current[message.id]) return;
-      if (message.senderId === currentUser.id) {
-        selfEncryptedIds.push(message.id);
-        return;
-      }
       if (e2eDecryptInflightRef.current.has(message.id)) return;
       pendingById.set(message.id, message);
     };
@@ -2143,20 +2164,6 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       for (const message of page.messages) {
         collect(message);
       }
-    }
-
-    if (selfEncryptedIds.length) {
-      setE2eDecryptFailed((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        for (const messageId of selfEncryptedIds) {
-          if (next[messageId]) continue;
-          next[messageId] = true;
-          e2eDecryptFailedRef.current[messageId] = true;
-          changed = true;
-        }
-        return changed ? next : prev;
-      });
     }
 
     if (!pendingById.size) return;

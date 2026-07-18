@@ -10,6 +10,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-nati
 
 import { Avatar } from "@/components/Avatar";
 import type { GUser } from "@/contexts/chats-types";
+import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { useColors } from "@/hooks/useColors";
 import { resolveAudioMessageUrl, type AudioMessagePayload } from "@/lib/media";
 
@@ -43,20 +44,21 @@ export function VoiceNoteBubble({
   renderStatusIcon,
 }: VoiceNoteBubbleProps) {
   const colors = useColors();
-  const resolvedAudioUrl = useMemo(
+  const remoteAudioUrl = useMemo(
     () => resolveAudioMessageUrl(audioPayload),
     [audioPayload],
   );
-  const player = useAudioPlayer(resolvedAudioUrl, {
+  const playbackUrl = useCachedMediaUrl(remoteAudioUrl);
+  const player = useAudioPlayer(playbackUrl, {
     updateInterval: 80,
-    downloadFirst: Boolean(resolvedAudioUrl?.startsWith("http")),
+    downloadFirst: Boolean(playbackUrl?.startsWith("http")),
   });
   const playerStatus = useAudioPlayerStatus(player);
 
   useEffect(() => {
-    if (!resolvedAudioUrl) return;
-    player.replace(resolvedAudioUrl);
-  }, [player, resolvedAudioUrl]);
+    if (!playbackUrl) return;
+    player.replace(playbackUrl);
+  }, [player, playbackUrl]);
 
   const totalDuration = useMemo(() => {
     if (playerStatus.duration && playerStatus.duration > 0) {
@@ -69,8 +71,8 @@ export function VoiceNoteBubble({
   const playbackProgress =
     totalDuration > 0 ? Math.min(currentTime / totalDuration, 1) : 0;
   const audioDisplaySeconds = player.playing ? currentTime : totalDuration || audioPayload.durationSeconds;
-  const playbackUnavailable = !resolvedAudioUrl;
-  const isLoading = Boolean(resolvedAudioUrl && !playerStatus.isLoaded && !player.playing);
+  const playbackUnavailable = !playbackUrl;
+  const isLoading = Boolean(remoteAudioUrl && !playbackUrl);
 
   const togglePlayback = () => {
     if (playbackUnavailable) return;
