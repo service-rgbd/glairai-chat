@@ -448,6 +448,11 @@ export function parseAudioMessagePayload(content: string): AudioMessagePayload |
   }
 }
 
+export function resolveAudioMessageUrl(payload: Pick<AudioMessagePayload, "key" | "url">) {
+  const resolved = getDisplayMediaUrl(payload.key, payload.url);
+  return resolved || null;
+}
+
 export function encodeImageMessagePayload(payload: ImageMessagePayload) {
   return JSON.stringify(payload);
 }

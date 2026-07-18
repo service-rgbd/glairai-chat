@@ -106,26 +106,27 @@ export function normalizeAvatarStorageKey(value?: string | null) {
   return null;
 }
 
+function extensionForContentType(contentType: string) {
+  if (contentType === "audio/aac") return "aac";
+  if (contentType === "audio/mpeg") return "mp3";
+  if (contentType === "audio/wav") return "wav";
+  if (contentType === "audio/mp4" || contentType === "audio/m4a" || contentType === "audio/x-m4a") {
+    return "m4a";
+  }
+  if (contentType === "video/mp4") return "mp4";
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/webp") return "webp";
+  if (contentType === "image/jpeg" || contentType === "image/jpg") return "jpg";
+  return "bin";
+}
+
 function buildMediaKey(
   category: MediaCategory,
   userId: string,
   contentType: string,
   conversationId?: string,
 ) {
-  const extension =
-    contentType === "audio/aac"
-      ? "aac"
-      : contentType === "audio/mpeg"
-        ? "mp3"
-        : contentType === "audio/wav"
-          ? "wav"
-          : contentType === "video/mp4"
-            ? "mp4"
-            : contentType === "image/png"
-              ? "png"
-              : contentType === "image/webp"
-                ? "webp"
-                : "jpg";
+  const extension = extensionForContentType(contentType);
 
   const baseDate = new Date().toISOString().slice(0, 10);
   const randomName = `${randomUUID()}.${extension}`;
@@ -206,6 +207,34 @@ export async function getMediaReadUrl(key: string) {
   return createSignedReadUrl(key);
 }
 
+function inferContentTypeFromKey(key: string) {
+  if (key.startsWith("voice-notes/")) {
+    return "audio/mp4";
+  }
+  if (key.endsWith(".m4a") || key.endsWith(".mp4")) {
+    return "audio/mp4";
+  }
+  if (key.endsWith(".aac")) {
+    return "audio/aac";
+  }
+  if (key.endsWith(".mp3")) {
+    return "audio/mpeg";
+  }
+  if (key.endsWith(".wav")) {
+    return "audio/wav";
+  }
+  if (key.endsWith(".png")) {
+    return "image/png";
+  }
+  if (key.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (key.endsWith(".jpg") || key.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  return null;
+}
+
 export async function openMediaObject(key: string) {
   requireR2Config();
   const client = createClient();
@@ -222,7 +251,7 @@ export async function openMediaObject(key: string) {
 
   return {
     body: response.Body,
-    contentType: response.ContentType ?? "application/octet-stream",
+    contentType: response.ContentType ?? inferContentTypeFromKey(key) ?? "application/octet-stream",
     contentLength: response.ContentLength,
   };
 }

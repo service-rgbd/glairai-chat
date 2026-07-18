@@ -19,7 +19,17 @@ function hashString(value: string) {
 
 function extensionFromUrl(url: string) {
   try {
-    const pathname = new URL(url).pathname;
+    const parsed = new URL(url);
+    const keyParam = parsed.searchParams.get("key");
+    if (keyParam) {
+      const decoded = decodeURIComponent(keyParam);
+      const keyMatch = decoded.match(/(\.[a-z0-9]{2,5})$/i);
+      if (keyMatch?.[1]) {
+        return keyMatch[1].toLowerCase();
+      }
+    }
+
+    const pathname = parsed.pathname;
     const match = pathname.match(/(\.[a-z0-9]{2,5})$/i);
     return match?.[1]?.toLowerCase() ?? ".bin";
   } catch {

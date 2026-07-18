@@ -1,12 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import React, { useMemo } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  setAudioModeAsync,
+  setIsAudioActiveAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+} from "expo-audio";
+import React, { useEffect, useMemo } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/Avatar";
 import type { GUser } from "@/contexts/chats-types";
 import { useColors } from "@/hooks/useColors";
-import type { AudioMessagePayload } from "@/lib/media";
+import { resolveAudioMessageUrl, type AudioMessagePayload } from "@/lib/media";
 
 const WAVEFORM_BARS = [
   0.28, 0.62, 0.44, 0.86, 0.52, 0.74, 0.38, 0.68, 0.56, 0.42, 0.78, 0.48, 0.66, 0.34, 0.58,
@@ -38,8 +43,20 @@ export function VoiceNoteBubble({
   renderStatusIcon,
 }: VoiceNoteBubbleProps) {
   const colors = useColors();
-  const player = useAudioPlayer(audioPayload.url, { updateInterval: 80 });
+  const resolvedAudioUrl = useMemo(
+    () => resolveAudioMessageUrl(audioPayload),
+    [audioPayload],
+  );
+  const player = useAudioPlayer(resolvedAudioUrl, {
+    updateInterval: 80,
+    downloadFirst: Boolean(resolvedAudioUrl?.startsWith("http")),
+  });
   const playerStatus = useAudioPlayerStatus(player);
+
+  useEffect(() => {
+    if (!resolvedAudioUrl) return;
+    player.replace(resolvedAudioUrl);
+  }, [player, resolvedAudioUrl]);
 
   const totalDuration = useMemo(() => {
     if (playerStatus.duration && playerStatus.duration > 0) {
@@ -52,31 +69,67 @@ export function VoiceNoteBubble({
   const playbackProgress =
     totalDuration > 0 ? Math.min(currentTime / totalDuration, 1) : 0;
   const audioDisplaySeconds = player.playing ? currentTime : totalDuration || audioPayload.durationSeconds;
+  const playbackUnavailable = !resolvedAudioUrl;
+  const isLoading = Boolean(resolvedAudioUrl && !playerStatus.isLoaded && !player.playing);
 
   const togglePlayback = () => {
-    if (player.playing) {
-      player.pause();
-      return;
-    }
-    if (
-      playerStatus.duration &&
-      playerStatus.currentTime >= playerStatus.duration &&
-      playerStatus.duration > 0
-    ) {
-      void player.seekTo(0);
-    }
-    player.play();
+    if (playbackUnavailable) return;
+
+    void (async () => {
+      try {
+        await setIsAudioActiveAsync(true);
+        await setAudioModeAsync({
+          allowsRecording: false,
+          playsInSilentMode: true,
+          interruptionMode: "mixWithOthers",
+        });
+
+        if (player.playing) {
+          player.pause();
+          return;
+        }
+
+        if (
+          playerStatus.duration > 0 &&
+          playerStatus.currentTime >= playerStatus.duration - 0.05
+        ) {
+          await player.seekTo(0);
+        }
+
+        player.play();
+      } catch {
+        // Ignorer si la session audio est indisponible.
+      }
+    })();
   };
 
   return (
     <View style={styles.voiceNote}>
-      <TouchableOpacity style={styles.voicePlayBtn} onPress={togglePlayback} activeOpacity={0.75}>
-        <Ionicons
-          name={player.playing ? "pause" : "play"}
-          size={22}
-          color={isMe ? colors.chatBubbleSentText : colors.mutedForeground}
-        />
-      </TouchableOpacity>
+      <Pressable
+        style={styles.voicePlayBtn}
+        onPress={togglePlayback}
+        disabled={playbackUnavailable}
+        hitSlop={8}
+      >
+        {isLoading ? (
+          <ActivityIndicator
+            size="small"
+            color={isMe ? colors.chatBubbleSentText : colors.primary}
+          />
+        ) : (
+          <Ionicons
+            name={player.playing ? "pause" : "play"}
+            size={22}
+            color={
+              playbackUnavailable
+                ? colors.mutedForeground
+                : isMe
+                  ? colors.chatBubbleSentText
+                  : colors.mutedForeground
+            }
+          />
+        )}
+      </Pressable>
 
       <View style={styles.voiceWaveWrap}>
         <View style={styles.waveformRow}>
@@ -110,7 +163,7 @@ export function VoiceNoteBubble({
               { color: isMe ? "rgba(255,255,255,0.78)" : colors.mutedForeground },
             ]}
           >
-            {formatDuration(audioDisplaySeconds)}
+            {playbackUnavailable ? "Audio indisponible" : formatDuration(audioDisplaySeconds)}
           </Text>
           <View style={styles.voiceTimeRow}>
             <Text

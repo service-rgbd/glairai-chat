@@ -122,6 +122,7 @@ export default function CallScreen() {
       failed?: boolean;
       missed?: boolean;
       declined?: boolean;
+      declinedByPeer?: boolean;
       suggestVoiceMessage?: boolean;
     }) => {
       if (hangupRef.current) return;
@@ -147,6 +148,15 @@ export default function CallScreen() {
       clearIncomingCallIfMatches(activeCallSessionId);
       setActiveCall(null);
       setSoundPhase("ended");
+
+      if (options?.declinedByPeer) {
+        Alert.alert(
+          "Occupé",
+          `${otherUser?.name ?? "Votre contact"} est occupé pour le moment.`,
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+        return;
+      }
 
       if (options?.suggestVoiceMessage && conversationId) {
         Alert.alert(
@@ -377,11 +387,20 @@ export default function CallScreen() {
         return;
       }
 
-      if (event.type === "declined" || event.type === "cancelled" || event.type === "missed") {
+      if (event.type === "declined") {
+        const wasConnected = wasConnectedRef.current;
+        finishCall({
+          declinedByPeer: !isIncoming && !wasConnected,
+          suggestVoiceMessage: false,
+        });
+        return;
+      }
+
+      if (event.type === "cancelled" || event.type === "missed") {
         const wasConnected = wasConnectedRef.current;
         finishCall({
           missed: isIncoming && !wasConnected,
-          suggestVoiceMessage: !isIncoming && !wasConnected,
+          suggestVoiceMessage: !isIncoming && !wasConnected && event.type === "missed",
         });
         return;
       }

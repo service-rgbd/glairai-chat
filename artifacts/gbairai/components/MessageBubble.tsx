@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import type { GMessage, GUser } from "@/contexts/chats-types";
 import { LinkableText } from "@/components/LinkableText";
@@ -290,8 +290,8 @@ export function MessageBubble({
 
   return (
     <View style={[styles.wrapper, isMe ? styles.wrapperMe : styles.wrapperOther]}>
-      <TouchableOpacity
-        style={[
+      {(() => {
+        const bubbleStyles = [
           styles.bubble,
           isMediaMessage && !isViewOnceCompact && styles.mediaBubble,
           isAudioMessage && styles.audioBubble,
@@ -305,10 +305,9 @@ export function MessageBubble({
             shadowRadius: 4,
             elevation: isMe ? 0 : 1,
           },
-        ]}
-        onLongPress={onLongPress}
-        activeOpacity={onLongPress ? 0.82 : 1}
-      >
+        ];
+        const bubbleBody = (
+          <>
         {showSenderName && sender && (
           <Text style={[styles.senderName, { color: sender.color }]}>{sender.name}</Text>
         )}
@@ -532,7 +531,27 @@ export function MessageBubble({
             <StatusIcon />
           </View>
         ) : null}
-      </TouchableOpacity>
+          </>
+        );
+
+        if (isAudioMessage) {
+          return (
+            <Pressable style={bubbleStyles} onLongPress={onLongPress} delayLongPress={280}>
+              {bubbleBody}
+            </Pressable>
+          );
+        }
+
+        return (
+          <TouchableOpacity
+            style={bubbleStyles}
+            onLongPress={onLongPress}
+            activeOpacity={onLongPress ? 0.82 : 1}
+          >
+            {bubbleBody}
+          </TouchableOpacity>
+        );
+      })()}
       {renderReactions()}
     </View>
   );

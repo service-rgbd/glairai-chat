@@ -5,7 +5,7 @@ import { CallBusyError, CallForbiddenError, CallNotFoundError } from "./call-err
 import {
   findRingingCallForCalleeFromDb,
   isUserBusyInDb,
-  releaseLiveSessionsForNewCallInDb,
+  releaseStaleSessionsForNewCallInDb,
 } from "./call-session-persistence";
 import { logger } from "./logger";
 import {
@@ -23,7 +23,7 @@ import {
   isUserBusy,
   markCallAnswered,
   markParticipantLeft,
-  releaseLiveSessionsForNewCall,
+  releaseStaleSessionsForNewCall,
   remainingCalleeIds,
   resolveCallSession,
   scheduleRingTimeout,
@@ -118,18 +118,6 @@ async function assertDirectCallsAllowed(callerUserId: string, calleeUserIds: str
   }
 }
 
-async function assertUsersAvailable(callerUserId: string, calleeUserIds: string[]) {
-  if (isUserBusy(callerUserId) || (await isUserBusyInDb(callerUserId))) {
-    throw new CallBusyError("Vous êtes déjà en communication");
-  }
-
-  for (const calleeId of calleeUserIds) {
-    if (isUserBusy(calleeId) || (await isUserBusyInDb(calleeId))) {
-      throw new CallBusyError("Le destinataire est occupé");
-    }
-  }
-}
-
 function assertCallParticipant(
   session: { callerUserId: string; calleeUserIds: string[] },
   userId: string,
@@ -196,12 +184,16 @@ export async function createCallSession(
     throw new CallForbiddenError("Aucun participant à appeler");
   }
 
-  // Un nouvel appel sortant prouve que les sessions précédentes de l'appelant
-  // sont mortes (signal de fin perdu, app fermée, redémarrage serveur) : on les
-  // libère avant le contrôle d'occupation pour éviter les faux
-  // « Vous êtes déjà en communication ».
-  releaseLiveSessionsForNewCall(currentUser.id, conversation.id);
-  await releaseLiveSessionsForNewCallInDb(currentUser.id, conversation.id);
+  // Purge les sessions expirées (crash, redémarrage serveur) sans libérer les appels actifs.
+  releaseStaleSessionsForNewCall(currentUser.id, conversation.id);
+  await releaseStaleSessionsForNewCallInDb(currentUser.id, conversation.id);
+
+  const existingRinging = findActiveCallByConversation(conversation.id);
+  const canRejoinOutgoingRing =
+    existingRinging &&
+    existingRinging.status === "ringing" &&
+    existingRinging.callerUserId === currentUser.id;
+  const ignoreCallerCallId = canRejoinOutgoingRing ? existingRinging.id : undefined;
 
   if (conversation.type === "direct") {
     await assertDirectCallsAllowed(currentUser.id, calleeUserIds);
@@ -214,7 +206,33 @@ export async function createCallSession(
       }
     }
   }
-  await assertUsersAvailable(currentUser.id, calleeUserIds);
+
+  if (
+    isUserBusy(currentUser.id, ignoreCallerCallId) ||
+    (await isUserBusyInDb(currentUser.id, ignoreCallerCallId))
+  ) {
+    throw new CallBusyError("Vous êtes déjà en communication");
+  }
+
+  for (const calleeId of calleeUserIds) {
+    if (isUserBusy(calleeId) || (await isUserBusyInDb(calleeId))) {
+      throw new CallBusyError("Le destinataire est occupé");
+    }
+  }
+
+  if (canRejoinOutgoingRing) {
+    const livekit = await buildLiveKitSession(authToken, {
+      conversationId: conversation.id,
+      type: input.type,
+      callId: existingRinging.id,
+    });
+
+    return {
+      ...livekit,
+      callId: existingRinging.id,
+      role: "caller" as const,
+    };
+  }
 
   const activeCall = storeCreateCallSession({
     conversationId: conversation.id,

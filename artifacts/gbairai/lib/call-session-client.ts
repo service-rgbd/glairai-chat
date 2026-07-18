@@ -33,8 +33,7 @@ export function assertCanStartCall(conversationId: string) {
   clearStaleActiveCall();
   if (!activeCall) return;
   if (activeCall.conversationId === conversationId) {
-    clearActiveCall();
-    return;
+    throw new Error("Un appel est déjà en cours sur cette conversation");
   }
   throw new Error("Vous êtes déjà en communication");
 }
