@@ -9,8 +9,10 @@
     "prestart": "pnpm run build",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test src/lib/channel-utils.test.mjs src/routes/channels.integration.test.mjs",
+    "test": "node --test src/lib/channel-utils.test.mjs src/routes/channels.integration.test.mjs src/lib/security.test.mjs",
     "test:channels": "node --test src/lib/channel-utils.test.mjs src/routes/channels.integration.test.mjs",
+    "test:security": "node --test src/lib/security.test.mjs",
+    "test:security:smoke": "node scripts/security-smoke-test.mjs",
     "generate:emoji-catalog": "node ./scripts/generate-emoji-catalog.mjs"
   },
   "dependencies": {
