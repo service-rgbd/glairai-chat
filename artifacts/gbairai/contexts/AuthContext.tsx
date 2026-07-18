@@ -23,6 +23,7 @@ import {
 } from "@/lib/geo-country";
 import { clearQueryCache, queryClient } from "@/lib/query-client";
 import { ensureCacheOwner, purgeOfflineCacheForUser } from "@/lib/offline-cache";
+import { signalPresenceOffline } from "@/lib/presence-session";
 import { clearArchivedAccessPassword } from "@/lib/archived-access";
 import { setMediaCachePolicy } from "@/lib/media-cache-policy";
 import { syncAndroidNotificationVibration } from "@/lib/notifications";
@@ -383,10 +384,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     const { resetContactsSyncState, resetContactsPermissionState } = await import("@/lib/contacts-sync");
+    const token = authToken;
 
-    // Déconnexion = fin de session uniquement. Le cache hors-ligne est conservé
-    // pour un affichage immédiat à la reconnexion du même compte.
+    await signalPresenceOffline({ authToken: token });
+
+    // Déconnexion = fin de session. Le cache disque est conservé pour une
+    // reconnexion rapide du même compte ; la mémoire est vidée pour éviter
+    // qu'un autre numéro hérite des présences de l'ancien.
     await Promise.all([safeRemoveItem(USER_STORAGE_KEY), safeRemoveItem(TOKEN_STORAGE_KEY)]);
+    queryClient.removeQueries({ queryKey: ["conversations"] });
+    queryClient.removeQueries({ queryKey: ["messages"] });
+    queryClient.removeQueries({ queryKey: ["stories"] });
+    queryClient.removeQueries({ queryKey: ["blocked-users"] });
     resetContactsSyncState();
     resetContactsPermissionState();
     setAuthTokenGetter(() => null);

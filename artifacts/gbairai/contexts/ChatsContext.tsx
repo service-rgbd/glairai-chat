@@ -52,6 +52,7 @@ import {
   runContactsSyncOnce,
 } from "@/lib/contacts-sync";
 import { UserCacheKeys, migrateLegacyUserCache } from "@/lib/offline-cache";
+import { registerPresenceSocketOffline } from "@/lib/presence-session";
 import { setIncomingCall, clearIncomingCallIfMatches, getIncomingCall } from "@/lib/incoming-call";
 import { shouldAcceptIncomingCall } from "@/lib/call-session-client";
 import { fetchPendingIncomingCall } from "@/lib/calls";
@@ -86,6 +87,7 @@ import {
 } from "@/lib/message-meta";
 import { encodeViewOnceOpenedContent } from "@/lib/view-once-media";
 import { MessageSoundsBridge } from "@/components/MessageSoundsBridge";
+import { triggerNotificationVibration } from "@/lib/notification-feedback";
 import { parseGroupSettings } from "@/lib/group-settings";
 import {
   encodeTextMessageContent,
@@ -216,13 +218,18 @@ const MESSAGES_STALE_MS = 1000 * 60 * 10;
 const E2E_PLAINTEXT_CACHE_PREFIX = "@gbairai/e2e/plaintext:";
 const E2E_PLAINTEXT_CACHE_LIMIT = 500;
 const MUTED_CONVERSATIONS_PREFIX = "@gbairai/conversations/muted:";
-
-function e2ePlaintextCacheKey(userId: string) {
-  return `${E2E_PLAINTEXT_CACHE_PREFIX}${userId}`;
-}
+const PINNED_CONVERSATIONS_PREFIX = "@gbairai/conversations/pinned:";
 
 function mutedConversationsKey(userId: string) {
   return `${MUTED_CONVERSATIONS_PREFIX}${userId}`;
+}
+
+function pinnedConversationsKey(userId: string) {
+  return `${PINNED_CONVERSATIONS_PREFIX}${userId}`;
+}
+
+function e2ePlaintextCacheKey(userId: string) {
+  return `${E2E_PLAINTEXT_CACHE_PREFIX}${userId}`;
 }
 
 function isHttpNotFound(error: unknown) {
@@ -698,6 +705,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   const [callsLastSeenAt, setCallsLastSeenAt] = useState<string | null>(null);
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const [localMutedConversationIds, setLocalMutedConversationIds] = useState<string[]>([]);
+  const [pinnedConversationIds, setPinnedConversationIds] = useState<string[]>([]);
   const [localCacheHydrated, setLocalCacheHydrated] = useState(false);
   const [localStorageReady, setLocalStorageReady] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -748,6 +756,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           rawLoadedConversations,
           rawCallsLastSeenAt,
           rawMutedConversations,
+          rawPinnedConversations,
         ] =
           await Promise.all([
             safeGetItem(UserCacheKeys.outbox(userId)),
@@ -756,6 +765,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             safeGetItem(UserCacheKeys.loadedConversations(userId)),
             safeGetItem(UserCacheKeys.callsLastSeenAt(userId)),
             safeGetItem(mutedConversationsKey(userId)),
+            safeGetItem(pinnedConversationsKey(userId)),
           ]);
 
         if (cancelled) return;
@@ -796,6 +806,12 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         } else {
           setLocalMutedConversationIds([]);
         }
+        if (rawPinnedConversations) {
+          const parsed = JSON.parse(rawPinnedConversations) as string[];
+          setPinnedConversationIds(Array.isArray(parsed) ? parsed : []);
+        } else {
+          setPinnedConversationIds([]);
+        }
       } catch {
         // ignore
       } finally {
@@ -811,6 +827,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       setCalls([]);
       setComposeContactsSnapshot([]);
       setLocalMutedConversationIds([]);
+      setPinnedConversationIds([]);
     }
     cachedUserIdRef.current = userId;
 
@@ -854,6 +871,14 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       JSON.stringify(localMutedConversationIds),
     );
   }, [currentUser?.id, isAuthenticated, localMutedConversationIds, localStorageReady]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
+    return scheduleSafeSetItem(
+      pinnedConversationsKey(currentUser.id),
+      JSON.stringify(pinnedConversationIds),
+    );
+  }, [currentUser?.id, isAuthenticated, localStorageReady, pinnedConversationIds]);
 
   useEffect(() => {
     if (!isAuthenticated || !localStorageReady || !currentUser?.id) return;
@@ -909,7 +934,15 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     const previousToken = prevAuthTokenRef.current;
     prevAuthTokenRef.current = authToken;
 
-    if (!authToken || !previousToken || previousToken === authToken) {
+    if (previousToken === authToken) {
+      return;
+    }
+
+    if (!authToken) {
+      queryClient.removeQueries({ queryKey: ["conversations"] });
+      queryClient.removeQueries({ queryKey: ["messages"] });
+      queryClient.removeQueries({ queryKey: ["stories"] });
+      queryClient.removeQueries({ queryKey: ["blocked-users"] });
       return;
     }
 
@@ -1047,7 +1080,19 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
   }, [authToken, outbox]);
 
   useEffect(() => {
+    registerPresenceSocketOffline(() => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("presence:heartbeat", { isOnline: false });
+      }
+    });
+    return () => registerPresenceSocketOffline(null);
+  }, []);
+
+  useEffect(() => {
     if (!authToken || !isRealtimeSocketEnabled()) {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("presence:heartbeat", { isOnline: false });
+      }
       socketRef.current?.disconnect();
       socketRef.current = null;
       setSocketConnected(false);
@@ -1166,6 +1211,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
           } else {
             playConversationListSoundRef.current?.();
           }
+        }
+        if (currentUser?.settings.vibrationEnabled !== false && !isMutedConversation) {
+          triggerNotificationVibration(true);
         }
       }
       if (currentUser?.id) {
@@ -1605,6 +1653,9 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      if (socket?.connected) {
+        socket.emit("presence:heartbeat", { isOnline: false });
+      }
       socket?.disconnect();
       socketRef.current = null;
       setSocketConnected(false);
@@ -1757,6 +1808,19 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
     if (isAuthenticated) return;
     resetContactsSyncState();
     setTypingByConversation({});
+    setComposeContactsSnapshot([]);
+    composeContactsRef.current = [];
+    setLoadedConversationIds([]);
+    setOutbox([]);
+    setCalls([]);
+    setStories([]);
+    setCallsLastSeenAt(null);
+    setLocalMutedConversationIds([]);
+    setPinnedConversationIds([]);
+    setPendingGroupInvites([]);
+    setBlockedUserIds([]);
+    cachedUserIdRef.current = null;
+    setLocalStorageReady(false);
     setE2eDecryptCache({});
     setE2eDecryptFailed({});
     setE2eReady(false);
@@ -1928,7 +1992,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             avatar: null,
             bio: "",
             status: "",
-            lastSeen: null,
+            lastSeen: "",
             initials: "?",
             color: "#6D4AFF",
           };
@@ -1973,6 +2037,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
             unreadCount: conversation.unreadCount,
             isArchived: Boolean(extended.isArchived),
             isMuted: Boolean(extended.isMuted || localMutedConversationIds.includes(conversation.id)),
+            isPinned: pinnedConversationIds.includes(conversation.id),
             groupSettings:
               conversation.type === "group"
                 ? parseGroupSettings(
@@ -2002,6 +2067,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
       e2eDecryptFailed,
       isAuthenticated,
       localMutedConversationIds,
+      pinnedConversationIds,
     ],
   );
 
@@ -2681,6 +2747,26 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
     void mark().catch(() => {
       delete lastReadMessageByChatRef.current[chatId];
+    });
+  };
+
+  const markChatAsUnread = (chatId: string) => {
+    delete lastReadMessageByChatRef.current[chatId];
+    queryClient.setQueryData<ConversationsPage>(["conversations"], (current) => ({
+      conversations: (current?.conversations ?? []).map((conversation) =>
+        conversation.id === chatId
+          ? { ...conversation, unreadCount: Math.max(conversation.unreadCount, 1) }
+          : conversation,
+      ),
+    }));
+  };
+
+  const pinConversation = (chatId: string, pinned = true) => {
+    setPinnedConversationIds((prev) => {
+      if (pinned) {
+        return prev.includes(chatId) ? prev : [...prev, chatId];
+      }
+      return prev.filter((id) => id !== chatId);
     });
   };
 
@@ -3444,6 +3530,8 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
         editMessage,
         setTypingState,
         markChatAsRead,
+        markChatAsUnread,
+        pinConversation,
         addStoryView,
         replyToStory,
         createStory,
