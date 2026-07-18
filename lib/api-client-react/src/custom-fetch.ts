@@ -20,6 +20,11 @@ let _authTokenGetter: AuthTokenGetter | null = null;
 let _otpDemoRequests = false;
 let _offlineMutationGuard: (() => boolean) | null = null;
 let _onOfflineMutationBlocked: (() => void) | null = null;
+let _onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  _onUnauthorized = handler;
+}
 
 /**
  * En mode test Expo, envoie `X-Otp-Demo: true` sur POST /auth/request-otp
@@ -406,6 +411,9 @@ export async function customFetch<T = unknown>(
   const response = await fetch(input, { ...init, method, headers });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      _onUnauthorized?.();
+    }
     const errorData = await parseErrorBody(response, method);
     throw new ApiError(response, errorData, requestInfo);
   }

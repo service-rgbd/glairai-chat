@@ -1,5 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import * as Crypto from "expo-crypto";
+
 import { safeGetItem, safeRemoveItem, safeSetItem } from "@/lib/safe-storage";
 import type { StoredDeviceKeys, StoredSession } from "@/lib/e2e/types";
 
@@ -15,17 +17,17 @@ function deviceKeysKey(userId: string) {
   return `${DEVICE_KEYS_PREFIX}${userId}`;
 }
 
-function randomDeviceId() {
-  const random = Math.random().toString(36).slice(2);
-  const timestamp = Date.now().toString(36);
-  return `dev_${timestamp}_${random}`;
+async function randomDeviceId() {
+  const bytes = await Crypto.getRandomBytesAsync(12);
+  const random = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `dev_${Date.now().toString(36)}_${random}`;
 }
 
 export async function getOrCreateDeviceId() {
   const existing = await safeGetItem(DEVICE_ID_KEY);
   if (existing?.trim()) return existing.trim();
 
-  const created = randomDeviceId();
+  const created = await randomDeviceId();
   await safeSetItem(DEVICE_ID_KEY, created);
   return created;
 }

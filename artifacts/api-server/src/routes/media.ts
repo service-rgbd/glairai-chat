@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { Router, type IRouter } from "express";
 
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
+import { assertUserCanAccessMediaKey, assertUserCanUploadToConversation } from "../lib/media-access";
 import {
   createAudioUploadTarget,
   createMediaUploadTarget,
@@ -39,6 +40,22 @@ function toNodeStream(body: unknown): Readable {
   throw new Error("Flux média invalide");
 }
 
+async function streamMediaForUser(req: AuthenticatedRequest, res: import("express").Response) {
+  const key = typeof req.query["key"] === "string" ? req.query["key"].trim() : "";
+  if (!key) {
+    throw new Error("Clé média manquante");
+  }
+
+  await assertUserCanAccessMediaKey(req.authUserId!, key);
+  const object = await openMediaObject(key);
+  res.setHeader("Content-Type", object.contentType);
+  if (object.contentLength) {
+    res.setHeader("Content-Length", String(object.contentLength));
+  }
+  res.setHeader("Cache-Control", "private, max-age=300");
+  toNodeStream(object.body).pipe(res);
+}
+
 router.post("/media/audio/upload-target", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const mimeType =
@@ -64,6 +81,8 @@ router.post("/media/upload-target", requireAuth, async (req: AuthenticatedReques
     const conversationId =
       typeof req.body?.conversationId === "string" ? req.body.conversationId : undefined;
 
+    await assertUserCanUploadToConversation(req.authUserId!, conversationId);
+
     const result = await createMediaUploadTarget({
       userId: req.authUserId!,
       category: category as Parameters<typeof createMediaUploadTarget>[0]["category"],
@@ -88,32 +107,22 @@ router.get("/media/resolve", requireAuth, async (req: AuthenticatedRequest, res)
     if (!key) {
       throw new Error("Clé média manquante");
     }
+    await assertUserCanAccessMediaKey(req.authUserId!, key);
     const url = await getMediaReadUrl(key);
     res.json({ key, url });
   } catch (error) {
-    res.status(400).json({
+    res.status(403).json({
       message:
         error instanceof Error ? error.message : "Impossible de résoudre le média",
     });
   }
 });
 
-router.get("/media/public", async (req, res) => {
+router.get("/media/public", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const key = typeof req.query["key"] === "string" ? req.query["key"].trim() : "";
-    if (!key) {
-      throw new Error("Clé média manquante");
-    }
-
-    const object = await openMediaObject(key);
-    res.setHeader("Content-Type", object.contentType);
-    if (object.contentLength) {
-      res.setHeader("Content-Length", String(object.contentLength));
-    }
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    toNodeStream(object.body).pipe(res);
+    await streamMediaForUser(req, res);
   } catch (error) {
-    res.status(400).json({
+    res.status(403).json({
       message:
         error instanceof Error ? error.message : "Impossible d'ouvrir le média",
     });

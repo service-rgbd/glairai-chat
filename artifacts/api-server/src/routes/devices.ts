@@ -22,4 +22,17 @@ router.post("/devices/register", requireAuth, async (req: AuthenticatedRequest, 
   }
 });
 
+router.post("/devices/unregister", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const pushToken = typeof req.body?.pushToken === "string" ? req.body.pushToken : "";
+    const result = await chatService.unregisterDeviceToken(req.authToken!, { pushToken });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      message:
+        error instanceof Error ? error.message : "Impossible de désinscrire l'appareil",
+    });
+  }
+});
+
 export default router;

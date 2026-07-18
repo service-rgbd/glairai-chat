@@ -59,6 +59,7 @@ import { fetchPendingIncomingCall } from "@/lib/calls";
 import { countUnreadMissedCalls } from "@/lib/call-badge";
 import { logConversationCall } from "@/lib/call-log";
 import { emitCallSignal } from "@/lib/call-signaling";
+import { setRegisteredPushToken } from "@/lib/push-device";
 import { isNativeLocalDbEnabled } from "@/lib/local-cache-enabled";
 import { prefetchConversationListMedia } from "@/lib/media-prefetch";
 import { isRealtimeSocketEnabled } from "@/lib/runtime-env";
@@ -1689,6 +1690,7 @@ export function ChatsProvider({ children }: { children: React.ReactNode }) {
 
         try {
           await registerPushDevice(pushToken, "Expo device");
+          setRegisteredPushToken(pushToken);
         } catch (error) {
           if (__DEV__) {
             console.warn("[Gbairai] enregistrement push échoué", error);

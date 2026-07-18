@@ -5,11 +5,13 @@ import { existsSync } from "node:fs";
 import router from "./routes";
 import { getChannelAssetsRoot } from "./lib/channel-assets";
 import { getFluentEmojiAssetsRoot } from "./lib/emoji-assets";
+import { enforceRateLimit, getClientIp } from "./lib/rate-limit";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
 app.set("trust proxy", true);
-const allowedOrigins = (process.env["CORS_ORIGINS"] ?? "*")
+const isProduction = process.env["NODE_ENV"] === "production";
+const allowedOrigins = (process.env["CORS_ORIGINS"] ?? (isProduction ? "" : "*"))
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
@@ -44,15 +46,38 @@ app.use((req, res, next) => {
 app.use(
   cors({
     origin:
-      allowedOrigins.length === 1 && allowedOrigins[0] === "*"
-        ? true
-        : allowedOrigins,
-    methods: ["GET", "POST", "PATCH"],
+      allowedOrigins.length === 0
+        ? false
+        : allowedOrigins.length === 1 && allowedOrigins[0] === "*"
+          ? true
+          : allowedOrigins,
+    methods: ["GET", "POST", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 app.use(express.json({ limit: "64kb" }));
 app.use(express.urlencoded({ extended: true, limit: "64kb" }));
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api/")) {
+    next();
+    return;
+  }
+  if (req.path.startsWith("/api/auth/request-otp") || req.path.startsWith("/api/auth/verify-otp")) {
+    next();
+    return;
+  }
+  try {
+    enforceRateLimit(`api:${getClientIp(req)}`, {
+      windowMs: 60_000,
+      maxRequests: process.env["NODE_ENV"] === "production" ? 240 : 600,
+    });
+    next();
+  } catch (error) {
+    res.status(429).json({
+      message: error instanceof Error ? error.message : "Trop de requêtes",
+    });
+  }
+});
 
 const emojiAssetsRoot = getFluentEmojiAssetsRoot();
 if (existsSync(emojiAssetsRoot)) {

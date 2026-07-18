@@ -6,6 +6,7 @@ import { Router, type IRouter } from "express";
 
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
 import { chatService } from "../lib/chat-service";
+import { enforceRateLimit, getClientIp } from "../lib/rate-limit";
 
 const router: IRouter = Router();
 
@@ -45,6 +46,10 @@ router.patch("/contacts/:phone", requireAuth, async (req: AuthenticatedRequest, 
 
 router.post("/contacts/sync", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
+    enforceRateLimit(`contacts:sync:${getClientIp(req)}`, {
+      windowMs: 10 * 60_000,
+      maxRequests: 20,
+    });
     const input = SyncContactsBody.parse(req.body);
     const result = await chatService.syncContacts(req.authToken!, input);
     res.json(SyncContactsResponse.parse(result));

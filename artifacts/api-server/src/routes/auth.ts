@@ -7,49 +7,45 @@ import {
 import { Router, type IRouter } from "express";
 
 import { chatService } from "../lib/chat-service";
-import { logger } from "../lib/logger";
+import { enforceRateLimit, getClientIp } from "../lib/rate-limit";
 import { shouldExposeOtpDemoCode } from "../lib/sms-service";
 
 const router: IRouter = Router();
-const otpRateLimit = new Map<string, number[]>();
+const MAX_VERIFY_PER_REQUEST = 8;
+const isProduction = process.env["NODE_ENV"] === "production";
 
 function getOtpRateLimitConfig() {
-  const strict = process.env["OTP_DEMO_CODE_ENABLED"] === "false";
+  const strict = isProduction || process.env["OTP_DEMO_CODE_ENABLED"] === "false";
   return {
     windowMs: strict ? 10 * 60_000 : 2 * 60_000,
     maxRequests: strict ? 5 : 30,
   };
 }
 
-function getClientKey(req: { ip?: string | undefined }) {
-  return req.ip ?? "unknown";
+function getVerifyOtpRateLimitConfig() {
+  return {
+    windowMs: 10 * 60_000,
+    maxRequests: isProduction ? 20 : 60,
+  };
 }
 
-function enforceOtpRateLimit(clientKey: string) {
-  const { windowMs, maxRequests } = getOtpRateLimitConfig();
-  const now = Date.now();
-  const history = (otpRateLimit.get(clientKey) ?? []).filter(
-    (timestamp) => now - timestamp < windowMs,
-  );
-
-  if (history.length >= maxRequests) {
-    throw new Error("Trop de demandes OTP, veuillez patienter quelques minutes");
+function normalizeOtpCode(code: string) {
+  const digits = code.trim().replace(/\D/g, "");
+  if (!/^\d{6}$/.test(digits)) {
+    throw new Error("Le code OTP doit contenir 6 chiffres");
   }
-
-  history.push(now);
-  otpRateLimit.set(clientKey, history);
+  return digits;
 }
 
 router.post("/auth/request-otp", async (req, res) => {
   try {
-    enforceOtpRateLimit(getClientKey(req));
+    const clientKey = getClientIp(req);
+    enforceRateLimit(`otp:request:${clientKey}`, getOtpRateLimitConfig());
     const input = RequestOtpBody.parse(req.body);
-    const forceDemoCode =
-      shouldExposeOtpDemoCode() || req.header("x-otp-demo") === "true";
+    const allowDemoHeader =
+      !isProduction && req.header("x-otp-demo") === "true";
+    const forceDemoCode = shouldExposeOtpDemoCode() || allowDemoHeader;
     const result = await chatService.requestOtp({ ...input, forceDemoCode });
-    if (forceDemoCode && !result.demoCode) {
-      logger.warn("OTP demoCode manquant malgré forceDemoCode=true");
-    }
     res.json(RequestOtpResponse.parse(result));
   } catch (error) {
     res.status(400).json({
@@ -60,12 +56,38 @@ router.post("/auth/request-otp", async (req, res) => {
 
 router.post("/auth/verify-otp", async (req, res) => {
   try {
+    const clientKey = getClientIp(req);
+    enforceRateLimit(`otp:verify:${clientKey}`, getVerifyOtpRateLimitConfig());
     const input = VerifyOtpBody.parse(req.body);
-    const result = await chatService.verifyOtp(input);
+    enforceRateLimit(`otp:verify:request:${input.requestId}`, {
+      windowMs: 10 * 60_000,
+      maxRequests: MAX_VERIFY_PER_REQUEST,
+    });
+    const result = await chatService.verifyOtp({
+      ...input,
+      code: normalizeOtpCode(input.code),
+    });
     res.json(VerifyOtpResponse.parse(result));
   } catch (error) {
     res.status(400).json({
       message: error instanceof Error ? error.message : "Impossible de vérifier le code",
+    });
+  }
+});
+
+router.post("/auth/logout", async (req, res) => {
+  try {
+    const header = req.header("authorization");
+    const token = header?.replace(/^Bearer\s+/i, "").trim();
+    if (!token) {
+      res.status(401).json({ message: "Authentification requise" });
+      return;
+    }
+    await chatService.revokeSession(token);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Impossible de se déconnecter",
     });
   }
 });

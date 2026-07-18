@@ -6,5 +6,6 @@ export {
   setAuthTokenGetter,
   setOfflineMutationGuard,
   setOtpDemoRequests,
+  setUnauthorizedHandler,
 } from "./custom-fetch";
 export type { AuthTokenGetter } from "./custom-fetch";

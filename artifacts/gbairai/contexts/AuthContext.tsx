@@ -6,6 +6,7 @@ import {
   setAuthTokenGetter,
   setBaseUrl,
   setOtpDemoRequests,
+  setUnauthorizedHandler,
   updateCurrentUser,
   verifyOtp,
   customFetch,
@@ -24,6 +25,9 @@ import {
 import { clearQueryCache, queryClient } from "@/lib/query-client";
 import { ensureCacheOwner, purgeOfflineCacheForUser } from "@/lib/offline-cache";
 import { signalPresenceOffline } from "@/lib/presence-session";
+import { logoutRemoteSession } from "@/lib/session-api";
+import { getSecureItem, migrateLegacySecureItem, removeSecureItem, setSecureItem } from "@/lib/secure-storage";
+import { setAuthTokenSnapshot } from "@/lib/auth-token";
 import { clearArchivedAccessPassword } from "@/lib/archived-access";
 import { setMediaCachePolicy } from "@/lib/media-cache-policy";
 import { syncAndroidNotificationVibration } from "@/lib/notifications";
@@ -159,15 +163,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setOtpDemoRequests(isOtpDemoDevMode());
 
         const [rawStoredToken, storedUser] = await Promise.all([
-          safeGetItem(TOKEN_STORAGE_KEY),
+          migrateLegacySecureItem(TOKEN_STORAGE_KEY),
           safeGetItem(USER_STORAGE_KEY),
         ]);
         storedToken = rawStoredToken;
 
         if (storedToken) {
           setAuthToken(storedToken);
+          setAuthTokenSnapshot(storedToken);
           setAuthTokenGetter(() => storedToken);
         } else {
+          setAuthTokenSnapshot(null);
           setAuthTokenGetter(() => null);
         }
 
@@ -261,7 +267,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setAuthTokenGetter(() => authToken);
+    setAuthTokenSnapshot(authToken);
   }, [authToken]);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      void (async () => {
+        const { resetContactsSyncState, resetContactsPermissionState } = await import(
+          "@/lib/contacts-sync"
+        );
+        await Promise.all([removeSecureItem(TOKEN_STORAGE_KEY), safeRemoveItem(USER_STORAGE_KEY)]);
+        queryClient.removeQueries({ queryKey: ["conversations"] });
+        resetContactsSyncState();
+        resetContactsPermissionState();
+        setAuthToken(null);
+        setCurrentUser(null);
+        setAuthTokenGetter(() => null);
+        setAuthTokenSnapshot(null);
+      })();
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   useEffect(() => {
     if (!currentUser) {
@@ -316,11 +342,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setPendingRequestId(null);
 
     await ensureCacheOwner(mapped.id);
+    setAuthTokenGetter(() => session.token);
+    setAuthTokenSnapshot(session.token);
     setAuthToken(session.token);
     setCurrentUser(mapped);
 
     await Promise.all([
-      safeSetItem(TOKEN_STORAGE_KEY, session.token),
+      setSecureItem(TOKEN_STORAGE_KEY, session.token),
       safeSetItem(USER_STORAGE_KEY, JSON.stringify(mapped)),
     ]);
     return mapped;
@@ -387,11 +415,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = authToken;
 
     await signalPresenceOffline({ authToken: token });
+    await logoutRemoteSession(token);
 
-    // Déconnexion = fin de session. Le cache disque est conservé pour une
-    // reconnexion rapide du même compte ; la mémoire est vidée pour éviter
-    // qu'un autre numéro hérite des présences de l'ancien.
-    await Promise.all([safeRemoveItem(USER_STORAGE_KEY), safeRemoveItem(TOKEN_STORAGE_KEY)]);
+    await Promise.all([removeSecureItem(TOKEN_STORAGE_KEY), safeRemoveItem(USER_STORAGE_KEY)]);
     queryClient.removeQueries({ queryKey: ["conversations"] });
     queryClient.removeQueries({ queryKey: ["messages"] });
     queryClient.removeQueries({ queryKey: ["stories"] });
@@ -399,6 +425,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resetContactsSyncState();
     resetContactsPermissionState();
     setAuthTokenGetter(() => null);
+    setAuthTokenSnapshot(null);
     setAuthToken(null);
     setCurrentUser(null);
   };

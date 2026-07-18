@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { getMediaAuthHeaders, isProtectedMediaUrl } from "@/lib/auth-token";
 import { peekCachedMediaUri, resolveCachedMediaUri } from "@/lib/media-cache";
 import { shouldResolveMediaToDisk } from "@/lib/media-cache-policy";
 
@@ -18,8 +19,16 @@ export function useCachedMediaUrl(remoteUrl: string | null | undefined) {
       return;
     }
 
-    setUri(remoteUrl);
+    if (!isProtectedMediaUrl(remoteUrl)) {
+      setUri(remoteUrl);
+    } else {
+      setUri(null);
+    }
+
     if (!shouldResolveMediaToDisk()) {
+      if (isProtectedMediaUrl(remoteUrl)) {
+        setUri(remoteUrl);
+      }
       return;
     }
 

@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useCachedMediaUrl } from "@/hooks/useCachedMediaUrl";
 import { resolveAvatarUrl } from "@/lib/avatar";
+import { getAuthenticatedImageSource } from "@/lib/media-image-source";
 
 interface AvatarProps {
   uri?: string | null;
@@ -20,7 +21,8 @@ export function Avatar({ uri, initials, color, size = 50, showOnline = false, is
   const fontSize = size * 0.38;
   const [imageFailed, setImageFailed] = useState(false);
   const resolvedUri = useCachedMediaUrl(resolveAvatarUrl(uri));
-  const shouldRenderImage = Boolean(resolvedUri) && !imageFailed;
+  const imageSource = getAuthenticatedImageSource(resolvedUri);
+  const shouldRenderImage = Boolean(imageSource) && !imageFailed;
 
   useEffect(() => {
     setImageFailed(false);
@@ -28,9 +30,9 @@ export function Avatar({ uri, initials, color, size = 50, showOnline = false, is
 
   return (
     <View style={{ width: size, height: size }}>
-      {shouldRenderImage && resolvedUri ? (
+      {shouldRenderImage && imageSource ? (
         <Image
-          source={{ uri: resolvedUri, cacheKey: resolvedUri }}
+          source={imageSource}
           style={{ width: size, height: size, borderRadius: size / 2 }}
           contentFit="cover"
           cachePolicy="memory-disk"

@@ -40,6 +40,10 @@ export async function encryptDirectTextMessage(
     return result.content;
   } catch (error) {
     if (isPeerKeysMissingError(error)) {
+      const allowPlaintextFallback = __DEV__ || process.env.EXPO_PUBLIC_E2E_STRICT === "false";
+      if (!allowPlaintextFallback) {
+        throw new Error("Impossible d'envoyer un message chiffré à ce contact");
+      }
       if (__DEV__) {
         console.warn("[Gbairai] E2E: contact sans clés — envoi en clair");
       }

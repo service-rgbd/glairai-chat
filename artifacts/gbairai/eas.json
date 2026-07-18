@@ -61,6 +61,7 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://glairai-chat.onrender.com",
+        "EXPO_PUBLIC_OTP_DEMO": "false",
         "EXPO_PUBLIC_E2E_ENABLED": "true",
         "EXPO_PUBLIC_LIVEKIT_ENABLED": "true",
         "EXPO_PUBLIC_NATIVE_CALL_UI": "true",

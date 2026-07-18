@@ -10,10 +10,17 @@ import {
 } from "../lib/apn-voip-push";
 
 const router: IRouter = Router();
+const isProduction = process.env["NODE_ENV"] === "production";
 
 router.get("/healthz", async (_req, res) => {
   try {
     const data = HealthCheckResponse.parse({ status: "ok" });
+
+    if (isProduction) {
+      res.json(data);
+      return;
+    }
+
     const livekitConfigured = isLiveKitConfigured();
     const livekitCheck = livekitConfigured ? await verifyLiveKitTokenGeneration() : null;
     const apnsVoipConfigured = isVoipPushConfigured();
@@ -27,18 +34,16 @@ router.get("/healthz", async (_req, res) => {
       apnsVoipConfigured,
       apnsVoipEnvironment: getApnsVoipEnvironment(),
       apnsVoipKeyOk: apnsCheck?.ok ?? false,
-      ...(livekitCheck && !livekitCheck.ok && livekitCheck.reason === "token_error"
-        ? { livekitError: livekitCheck.message }
-        : {}),
-      ...(apnsCheck && !apnsCheck.ok && apnsCheck.reason === "invalid_key"
-        ? { apnsVoipError: apnsCheck.message }
-        : {}),
     });
   } catch (error) {
     res.status(200).json({
       status: "ok",
-      otpDemoCodeEnabled: shouldExposeOtpDemoCode(),
-      healthDiagnosticsError: error instanceof Error ? error.message : String(error),
+      ...(isProduction
+        ? {}
+        : {
+            healthDiagnosticsError:
+              error instanceof Error ? error.message : String(error),
+          }),
     });
   }
 });

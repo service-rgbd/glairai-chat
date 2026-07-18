@@ -1,6 +1,7 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 
-import { finalizeCall, getCallSession, markCallLogCreated } from "./call-session-store";
+import { finalizeCall, getCallSession, markCallLogCreated, resolveCallSession } from "./call-session-store";
+import { loadCallSessionFromDb } from "./call-session-persistence";
 import { sendVoipIncomingCallPushes } from "./apn-voip-push";
 import { encodeCallMessagePayload, isCallMessageContent, type CallMessageOutcome } from "./call-messages";
 import {
@@ -35,7 +36,7 @@ import {
   userBlocksTable,
   usersTable,
 } from "@workspace/db";
-import { and, desc, eq, gte, inArray, isNull, like, lte, ne, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import { getCountries, getCountryCallingCode, parsePhoneNumberFromString } from "libphonenumber-js";
 
 import {
@@ -541,7 +542,7 @@ function randomId(prefix: string) {
 }
 
 function randomOtpCode() {
-  return `${Math.floor(100000 + Math.random() * 900000)}`;
+  return `${randomInt(100000, 1000000)}`;
 }
 
 function sha256(value: string) {
@@ -850,8 +851,8 @@ class InMemoryChatService {
     const exposeDemoCode = shouldExposeOtpDemoCode() || input.forceDemoCode;
     if (exposeDemoCode) {
       logger.info(
-        { phone: normalized.e164, requestId, otpDemoCode: rawCode },
-        "OTP demo code generated",
+        { phone: normalized.e164, requestId },
+        "OTP demo mode actif",
       );
     }
 
@@ -1152,7 +1153,7 @@ class InMemoryChatService {
       startIndex = foundIndex >= 0 ? foundIndex + 1 : 0;
     }
 
-    const limit = params.limit ?? 50;
+    const limit = Math.min(Math.max(params.limit ?? 50, 1), 100);
     const page = all.slice(startIndex, startIndex + limit);
     const nextCursor =
       startIndex + limit < all.length ? page.at(-1)?.id ?? null : null;
@@ -1822,8 +1823,8 @@ class DatabaseChatService implements ChatService {
     const exposeDemoCode = shouldExposeOtpDemoCode() || input.forceDemoCode;
     if (exposeDemoCode) {
       logger.info(
-        { phone: normalized.e164, requestId, otpDemoCode: rawCode },
-        "OTP demo code generated",
+        { phone: normalized.e164, requestId },
+        "OTP demo mode actif",
       );
     }
 
@@ -1867,7 +1868,9 @@ class DatabaseChatService implements ChatService {
     if (!secureStringEqual(request.codeHash, providedCodeHash)) {
       await db!
         .update(otpCodesTable)
-        .set({ attempts: request.attempts + 1 })
+        .set({
+          attempts: sql`${otpCodesTable.attempts} + 1`,
+        })
         .where(eq(otpCodesTable.id, request.id));
       throw new Error("Code OTP invalide");
     }
@@ -2722,7 +2725,7 @@ class DatabaseChatService implements ChatService {
       startIndex = foundIndex >= 0 ? foundIndex + 1 : 0;
     }
 
-    const limit = params.limit ?? 50;
+    const limit = Math.min(Math.max(params.limit ?? 50, 1), 100);
     const page = all.slice(startIndex, startIndex + limit);
     const nextCursor = startIndex + limit < all.length ? page.at(-1)?.id ?? null : null;
     const reactionsMap = await this.getReactionsMapForMessages(
@@ -2908,6 +2911,10 @@ class DatabaseChatService implements ChatService {
     }
 
     await this.requireConversationMembership(message.conversationId, user.id);
+
+    if (message.senderId !== user.id) {
+      throw new Error("Vous ne pouvez supprimer que vos propres messages");
+    }
 
     if (isDeletedMessageContent(message.content)) {
       throw new Error("Ce message a déjà été supprimé");
@@ -3547,13 +3554,23 @@ class DatabaseChatService implements ChatService {
     }
 
     const id = randomId("device");
+    const [existing] = await db!
+      .select()
+      .from(deviceTokensTable)
+      .where(eq(deviceTokensTable.pushToken, input.pushToken))
+      .limit(1);
+
+    if (existing && existing.userId !== user.id) {
+      throw new Error("Cet appareil est déjà associé à un autre compte");
+    }
+
     await db!
       .insert(deviceTokensTable)
       .values({
-        id,
+        id: existing?.id ?? id,
         userId: user.id,
         pushToken: input.pushToken,
-        voipPushToken: input.voipPushToken ?? null,
+        voipPushToken: input.voipPushToken ?? existing?.voipPushToken ?? null,
         platform: input.platform,
         deviceName: input.deviceName,
         updatedAt: new Date(),
@@ -3973,8 +3990,39 @@ class DatabaseChatService implements ChatService {
     if (!participantIds.includes(input.callerUserId)) {
       throw new Error("Appel non autorisé");
     }
+
+    const session =
+      (await resolveCallSession(input.callId)) ?? (await loadCallSessionFromDb(input.callId));
+    if (!session || session.conversationId !== input.conversationId) {
+      throw new Error("Appel introuvable");
+    }
+
     const created = await this.persistCallLogMessage(input);
     return { created };
+  }
+
+  async revokeSession(token: string) {
+    this.requireDatabase();
+    const tokenHash = sha256(token.trim());
+    await db!.delete(sessionsTable).where(eq(sessionsTable.tokenHash, tokenHash));
+    return { ok: true as const };
+  }
+
+  async unregisterDeviceToken(
+    token: string,
+    input: { pushToken: string },
+  ) {
+    const user = await this.requireUserByToken(token);
+    const pushToken = input.pushToken.trim();
+    if (!pushToken) {
+      throw new Error("Token push invalide");
+    }
+    await db!
+      .delete(deviceTokensTable)
+      .where(
+        and(eq(deviceTokensTable.userId, user.id), eq(deviceTokensTable.pushToken, pushToken)),
+      );
+    return { ok: true as const };
   }
 
   async notifyCallSignal(input: {

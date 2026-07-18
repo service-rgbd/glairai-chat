@@ -6,9 +6,20 @@ import { chatService, type RealtimeEvent } from "./chat-service";
 import { logger } from "./logger";
 
 export function attachRealtime(httpServer: HttpServer) {
+  const isProduction = process.env["NODE_ENV"] === "production";
+  const corsOrigins = (process.env["CORS_ORIGINS"] ?? (isProduction ? "" : "*"))
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin:
+        corsOrigins.length === 0
+          ? false
+          : corsOrigins.length === 1 && corsOrigins[0] === "*"
+            ? "*"
+            : corsOrigins,
     },
   });
 
@@ -122,14 +133,22 @@ export function attachRealtime(httpServer: HttpServer) {
 
         if (
           Array.isArray(payload.participantUserIds) &&
-          payload.participantUserIds.includes(userId) &&
           payload.participantUserIds.length <= 100
         ) {
-          for (const participantId of new Set(payload.participantUserIds)) {
-            if (participantId !== userId) {
-              io.to(`user:${participantId}`).emit("typing.updated", typingPayload);
-            }
-          }
+          void Promise.resolve(chatService.getConversation(token, payload.conversationId))
+            .then((conversation) => {
+              const allowedIds = new Set(
+                conversation.participants.map((participant) => participant.userId),
+              );
+              if (!allowedIds.has(userId)) return;
+              for (const participantId of new Set(payload.participantUserIds)) {
+                if (participantId === userId || !allowedIds.has(participantId)) continue;
+                io.to(`user:${participantId}`).emit("typing.updated", typingPayload);
+              }
+            })
+            .catch((error: unknown) => {
+              logger.warn({ err: error }, "Failed to broadcast typing update");
+            });
           return;
         }
 

@@ -1,5 +1,7 @@
 import { Directory, File, Paths } from "expo-file-system";
 
+import { getMediaAuthHeaders, isProtectedMediaUrl } from "@/lib/auth-token";
+
 const CACHE_FOLDER = "gbairai-media";
 const MAX_CACHE_BYTES = 500 * 1024 * 1024;
 const inFlight = new Map<string, Promise<string>>();
@@ -83,6 +85,17 @@ async function trimCacheIfNeeded() {
 async function downloadToCache(remoteUrl: string) {
   const target = cacheFileForUrl(remoteUrl);
   if (target.exists) {
+    return target.uri;
+  }
+
+  if (isProtectedMediaUrl(remoteUrl)) {
+    const response = await fetch(remoteUrl, { headers: getMediaAuthHeaders() });
+    if (!response.ok) {
+      throw new Error("Impossible de télécharger le média");
+    }
+    const bytes = await response.arrayBuffer();
+    target.write(new Uint8Array(bytes));
+    await trimCacheIfNeeded();
     return target.uri;
   }
 
